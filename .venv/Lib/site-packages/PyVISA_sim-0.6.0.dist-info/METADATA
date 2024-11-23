@@ -1,0 +1,137 @@
+Metadata-Version: 2.1
+Name: PyVISA-sim
+Version: 0.6.0
+Summary: Simulated backend for PyVISA implementing TCPIP, GPIB, RS232, and USB resources
+Author-email: "Hernan E. Grecco" <hernan.grecco@gmail.com>
+Maintainer-email: "Matthieu C. Dartiailh" <m.dartiailh@gmail.com>
+License: The MIT License
+        
+        Copyright (c) 2014 PyVISA-sim Authors and contributors. See AUTHORS
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy of
+        this software and associated documentation files (the "Software"), to deal in
+        the Software without restriction, including without limitation the rights to
+        use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+        of the Software, and to permit persons to whom the Software is furnished to do
+        so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+        
+Project-URL: homepage, https://github.com/pyvisa/pyvisa-sim
+Project-URL: documentation, https://pyvisa-sim.readthedocs.io/en/latest/
+Project-URL: repository, https://github.com/pyvisa/pyvisa-sim
+Project-URL: changelog, https://github.com/pyvisa/pyvisa-sim/blob/main/CHANGES.rst
+Keywords: VISA,GPIB,USB,serial,RS232,measurement,acquisition,simulator,mock
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Operating System :: MacOS :: MacOS X
+Classifier: Programming Language :: Python
+Classifier: Topic :: Scientific/Engineering :: Interface Engine/Protocol Translator
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.7
+Description-Content-Type: text/x-rst
+License-File: LICENSE.txt
+License-File: AUTHORS.rst
+Requires-Dist: pyvisa >=1.11.0
+Requires-Dist: PyYAML
+Requires-Dist: stringparser
+Requires-Dist: typing-extensions
+
+PyVISA-sim
+==========
+
+.. image:: https://github.com/pyvisa/pyvisa-sim/workflows/Continuous%20Integration/badge.svg
+    :target: https://github.com/pyvisa/pyvisa-sim/actions
+    :alt: Continuous integration
+.. image:: https://github.com/pyvisa/pyvisa-sim/workflows/Documentation%20building/badge.svg
+    :target: https://github.com/pyvisa/pyvisa/actions
+    :alt: Documentation building
+.. image:: https://codecov.io/gh/pyvisa/pyvisa-sim/branch/main/graph/badge.svg
+    :target: https://codecov.io/gh/pyvisa/pyvisa-sim
+    :alt: Code Coverage
+.. image:: https://readthedocs.org/projects/pyvisa-sim/badge/?version=latest
+    :target: https://pyvisa-sim.readthedocs.io/en/latest/?badge=latest
+    :alt: Documentation Status
+.. image:: https://img.shields.io/pypi/l/PyVISA-sim
+    :target: https://pypi.python.org/pypi/pyvisa-sim
+    :alt: PyPI - License
+.. image:: https://img.shields.io/pypi/v/PyVISA-sim
+    :target: https://pypi.python.org/pypi/pyvisa-sim
+    :alt: PyPI
+
+PyVISA-sim is a PyVISA backend that simulates a large part of the
+"Virtual Instrument Software Architecture" (`VISA`_).
+
+Description
+-----------
+
+PyVISA started as a wrapper for the NI-VISA library and therefore you
+need to install the National Instruments VISA library in your system.
+This works most of the time, for most people. But sometimes you need to
+test PyVISA without the physical devices or even without NI-VISA.
+
+Starting from version 1.6, PyVISA allows to use different backends.
+These backends can be dynamically loaded. PyVISA-sim is one of such
+backends. It implements most of the methods for Message Based
+communication (Serial/USB/GPIB/Ethernet) in a simulated environment. The
+behaviour of simulated devices can be controlled by a simple plain text
+configuration file.
+
+VISA and Python
+---------------
+
+Python has a couple of features that make it very interesting for
+measurement controlling:
+
+-  Python is an easy-to-learn scripting language with short development
+   cycles.
+-  It represents a high abstraction level, which perfectly blends with
+   the abstraction level of measurement programs.
+-  It has a very rich set of native libraries, including numerical and
+   plotting modules for data analysis and visualisation.
+-  A large set of books (in many languages) and on-line publications is
+   available.
+
+Requirements
+------------
+
+-  Python (tested with 3.8 to 3.11)
+-  PyVISA 1.11+
+
+Installation
+------------
+
+Using ``pip``:
+
+   $ pip install -U pyvisa-sim
+
+or install the development version:
+
+   $ pip install git+https://github.com/pyvisa/pyvisa-sim
+
+PyVISA is automatically installed if needed.
+
+
+Documentation
+-------------
+
+The documentation can be read online at https://pyvisa-sim.readthedocs.org
+
+.. _VISA: http://www.ivifoundation.org/Downloads/Specifications.html
