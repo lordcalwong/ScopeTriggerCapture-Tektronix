@@ -5,21 +5,26 @@ import os
 import pyvisa 
 rm = pyvisa.ResourceManager('@py')
 
+# Use Python device management package from Tektronix
+from tm_devices import DeviceManager
+from tm_devices.drivers import DPO4K
+
 # List available resources
 rm.list_resources()
 os.environ["TM_OPTIONS"] = "STANDALONE"
 
-from tm_devices import DeviceManager
-from tm_devices.drivers import DPO4K
+# Some file utility packages
+import time
+import datetime
+import os
 
-# # import time
-# # import numpy
 
-# Modify the following lines to configure this script for your instrument
+# Modify the following lines to configure this script 
+# for your needs or particular instrument
 #==============================================
 visaResourceAddr = '10.101.100.254'
 #visaResourceAddr = 'TCPIP::10.101.100.236::INSTR'
-#fileSaveLocation = 'C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop\'
+savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\"
 #==============================================
 
 with DeviceManager(verbose=True) as device_manager:
@@ -53,6 +58,9 @@ with DeviceManager(verbose=True) as device_manager:
     scope.write("CH1:OFFSet 0")
     scope.write("CH1:BANdwidth 250E6")
 
+    # This capability and nomenclature may vary by scope MFR for 
+    # cursor displayand making measurements
+    scope.write("CURSor:FUNCtion OFF")
     scope.write("MEASUrement:MEAS1:SOUrce1 CH1;STATE 1;TYPE PK2Pk")
     scope.write("MEASUrement:MEAS2:SOUrce1 CH1;STATE 1;TYPE RMS")
 
@@ -60,37 +68,45 @@ with DeviceManager(verbose=True) as device_manager:
     scope.write("ACQuire:MODe SAMPLE")
     scope.write("ACQuire:STOPAfter SEQuence")
 
+    # Wait for scope to finsh
     scope.commands.opc.query()
     
-    # Trigger
+    # Generate a filename based on the current Date & Time
+    dt = datetime.datetime.now()
+    fileName = dt.strftime("%Y%m%d.txt")
 
+    # Trigger scope and start recording
+    scope.write("ACQuire:STATE 1")
 
-    # Measure
-    # voltage = scope.query("MEASUrement:MEAS1:SOUrce1 CH1;STATE 1;TYPE PK2Pk")
-    # ch1pk2pk = float(scope.commands.measurement.meas[1].results.allacqs.mean.query())
-    # print(f'Channel 1 pk2pk: {ch1pk2pk}')
+    # Create data file with header
+    with open(os.path.join(savePath , fileName), "w") as datafile:
+        datafile.write("Time, Vpk2pk, Vrms\n")
+        datafile.close()
 
-# scope.commands.measurement.addmeas.write('PK2Pk')
+    # Trigger Capture Loop
+    while (True):
+        time.sleep(5)
+        Status = scope.query('ACQuire:STATE?')
+        if Status == '0' :  # Scope triggered
+            print ("triggered")
+            # get time
+            dt = datetime.datetime.now()
+            # grab measured data and display for user
+            Vp2p = float(scope.query("MEASUREMENT:MEAS1:VALue?"))
+            Vrms = float(scope.query("MEASUREMENT:MEAS2:VALue?"))
+            print(f"Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
+            # append data to data file
+            with open(os.path.join(savePath , fileName), "a") as datafile:
+                datafile.write(f"{dt.hour}.{dt.minute}.{dt.second}, {Vp2p:.3f}, {Vrms:.3f}\n")
+                datafile.close()
+            # Wait 5 sec before re-triggering single
+            time.sleep(5)
+            scope.write("ACQuire:STATE 1")
+        else:
+            # notify and allow user input
+            print ("not triggered")
+            time.sleep(5)
 
-# scope.commands.trigger.a.type.write("EDGE")
-
-# scope.commands.opc.query()
-
-# scope.write("SAVe:IMAGe:FILEFormat PNG")
-# scope.write("SAVe:IMAGe:INKSaver OFF")
-# scope.write("HARDCopy STARt")
-# scope.query("*OPC?")  # Wait for the operation to complete
-
-#imgData = scope.read_raw()
-
-# # Generate a filename based on the current Date & Time
-# dt = datetime.now()
-# fileName = dt.strftime("%Y%m%d_%H%M%S.png")
-
-# imgFile = open(fileSaveLocation + fileName, "wb")
-# imgFile.write(imgData)
-# imgFile.close()
-
-# scope.close()
-# rm.close()
+scope.close()
+rm.close()
 
