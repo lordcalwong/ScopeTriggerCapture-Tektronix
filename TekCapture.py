@@ -4,6 +4,7 @@
 import os
 import pyvisa 
 rm = pyvisa.ResourceManager('@py')
+counter = 0
 
 # Use Python device management package from Tektronix
 from tm_devices import DeviceManager
@@ -18,7 +19,6 @@ import time
 import datetime
 import os
 
-
 # Modify the following lines to configure this script 
 # for your needs or particular instrument
 #==============================================
@@ -26,6 +26,8 @@ visaResourceAddr = '10.101.100.254'
 #visaResourceAddr = 'TCPIP::10.101.100.236::INSTR'
 savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\"
 #==============================================
+
+
 
 with DeviceManager(verbose=True) as device_manager:
     scope:DPO4K = device_manager.add_scope(visaResourceAddr)
@@ -80,15 +82,17 @@ with DeviceManager(verbose=True) as device_manager:
 
     # Create data file with header
     with open(os.path.join(savePath , fileName), "w") as datafile:
-        datafile.write("Time, Vpk2pk, Vrms\n")
+        datafile.write("Count, Time, Vpk2pk, Vrms\n")
         datafile.close()
 
     # Trigger Capture Loop
     while (True):
+        # slow script down
         time.sleep(5)
         Status = scope.query('ACQuire:STATE?')
         if Status == '0' :  # Scope triggered
             print ("triggered")
+            counter += 1
             # get time
             dt = datetime.datetime.now()
             # grab measured data and display for user
@@ -97,13 +101,13 @@ with DeviceManager(verbose=True) as device_manager:
             print(f"Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
             # append data to data file
             with open(os.path.join(savePath , fileName), "a") as datafile:
-                datafile.write(f"{dt.hour}.{dt.minute}.{dt.second}, {Vp2p:.3f}, {Vrms:.3f}\n")
+                datafile.write(f"{counter}, {dt.hour}.{dt.minute}.{dt.second}, {Vp2p:.3f}, {Vrms:.3f}\n")
                 datafile.close()
-            # Wait 5 sec before re-triggering single
+            # Wait 5 sec before allowing re-triggering, single-mode
             time.sleep(5)
             scope.write("ACQuire:STATE 1")
-        else:
-            # notify and allow user input
+        else:   # Still waiting for a trigger
+            # notify user of status and/or allow user input for other functions
             print ("not triggered")
             time.sleep(5)
 
