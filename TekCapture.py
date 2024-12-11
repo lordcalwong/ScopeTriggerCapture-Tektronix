@@ -87,8 +87,8 @@ with DeviceManager(verbose=True) as device_manager:
 
     # Trigger Capture Loop
     while (True):
-        # slow script down
-        time.sleep(5)
+        # slow script down for interrupts
+        time.sleep(1)
         Status = scope.query('ACQuire:STATE?')
         if Status == '0' :  # Scope triggered
             print ("triggered")
@@ -98,18 +98,20 @@ with DeviceManager(verbose=True) as device_manager:
             # grab measured data and display for user
             Vp2p = float(scope.query("MEASUREMENT:MEAS1:VALue?"))
             Vrms = float(scope.query("MEASUREMENT:MEAS2:VALue?"))
-            print(f"Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
+            print(f"counter: {counter} Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
             # append data to data file
             with open(os.path.join(savePath , fileName), "a") as datafile:
-                datafile.write(f"{counter}, {dt.hour}.{dt.minute}.{dt.second}, {Vp2p:.3f}, {Vrms:.3f}\n")
+                datafile.write(f"{counter:4.0f}, {dt.hour:02d}.{dt.minute:02d}.{dt.second:02d}, {Vp2p:.3f}, {Vrms:.3f}\n")
                 datafile.close()
-            # Wait 5 sec before allowing re-triggering, single-mode
-            time.sleep(5)
+            # Allow time for save before allowing re-triggering, single-mode
+            time.sleep(2)
             scope.write("ACQuire:STATE 1")
+            # Allow time for scope to set up for trigger 
+            time.sleep(2)
         else:   # Still waiting for a trigger
             # notify user of status and/or allow user input for other functions
             print ("not triggered")
-            time.sleep(5)
+            time.sleep(1)
 
 scope.close()
 rm.close()
