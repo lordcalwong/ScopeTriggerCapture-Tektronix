@@ -1,41 +1,41 @@
 # For DPO4034 Series Scope
-# Connect to scope to set up, trigger, and save image/screenshot (hardcopy) to PC for 4 Series MSO Oscilloscopes
+# Connect to scope via Ethernet to set up, trigger, and save image/screenshot (hardcopy) to PC for 4 Series MSO Oscilloscopes
+# Cal Wong, 2024-01-21
 
-# Select the PyVISA-py backend
+# OS and PyVISA-py
 import os       # interact with the operating system and file management
 import pyvisa   # control of instruments over wide range of interfaces
 rm = pyvisa.ResourceManager('@py')
-counter = 0
 
 # Use Python device management package from Tektronix
-from tm_devices import DeviceManager
-from tm_devices.drivers import MSO5                            # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
 # from tm_devices.helpers import PYVISA_PY_BACKEND, SYSTEM_DEFAULT_VISA_BACKEND
+from tm_devices import DeviceManager
+from tm_devices.drivers import MSO4                            # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
 
 # List available resources
 rm.list_resources()
 os.environ["TM_OPTIONS"] = "STANDALONE"
 
-# Use time, date packages
+# Packages used
 import time
 import datetime
-
-# Use keyboard package
 import keyboard
 
 # Modify following section to configure this script for scope or interface
 #==============================================
-visaResourceAddr = '10.101.100.176'     #DPO4034                # CHANGE FOR YOUR PARTICULAR SCOPE!
+# CHANGE FOR YOUR PARTICULAR SCOPE!
+visaResourceAddr = '10.101.100.254'     #DPO4034 BPS Bench
+# visaResourceAddr = '10.101.100.176'   #DPO4034
 # visaResourceAddr = '10.101.100.236'   #MSO58
 #visaResourceAddr = 'TCPIP::10.101.100.236::INSTR'
-savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\"
+savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\DATA"       # CHANGE TO YOUR PREFERRED DESTINATION
 #==============================================
 
-
+counter = 0  # trigger counter to track data record
 with DeviceManager(verbose=True) as device_manager:
 
     # Open device
-    scope:MSO5 = device_manager.add_scope(visaResourceAddr)    # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
+    scope:MSO4 = device_manager.add_scope(visaResourceAddr)    # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
     print(scope.idn_string)
 
     # Set up scope
@@ -94,8 +94,11 @@ with DeviceManager(verbose=True) as device_manager:
 
         # Trigger Capture Loop
         while (True):
-            # Slow script down for interrupts
-            time.sleep(1)
+
+            # Check if user keyboard press
+            if keyboard.is_pressed('q'):
+                print("Loop terminated by user.")
+                break
 
             Status = scope.query('ACQuire:STATE?')
             if Status == '0' :  
@@ -117,14 +120,14 @@ with DeviceManager(verbose=True) as device_manager:
                 scope.write('HARDCOPY:PORT ETHERNET')
                 scope.write('HARDCopy START')
                 raw_data = scope.read_raw()
-                fid = open('my_image.png', 'wb')
+                imgfileName = dt.strftime("%Y%m%d %H.%M.%S.png")
+                imgfilePath = os.path.join(savePath , imgfileName)
+                fid = open(imgfilePath, 'wb')
                 fid.write(raw_data)
                 fid.close()
-                # Note- This routine works but has been deprecated in their newer scopes.
-                # CAUTION- Use only on Tek DPO4000/MSO4000 scopes and earlier
-
-                # SHOULD WORK BUT DOESN'T.. .
-                # scope.save_screenshot("example.png")
+                # CAUTION- This routine tested on DPO4 series only.  Not tested on newer scopes.
+                # HARDCOPY may be depricated on newer scopes.
+                # SHOULD WORK BUT DOESN'T.. . is scope.save_screenshot("example.png")
 
                 # Append measured data to data file
                 with open(os.path.join(savePath , fileName), "a") as datafile:
@@ -137,13 +140,6 @@ with DeviceManager(verbose=True) as device_manager:
 
                 # Allow time for scope to set up for trigger 
                 time.sleep(2)
-
-                # Check if user keyboard press
-                if keyboard.is_pressed('q'):
-                    print("Loop terminated by user.")
-                    scope.close()
-                    rm.close()
-                    break
 
             else:   # Still waiting for a trigger
                 # Notify user of status and/or allow user input for other functions
