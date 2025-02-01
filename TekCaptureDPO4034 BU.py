@@ -151,3 +151,6 @@ with DeviceManager(verbose=True) as device_manager:
                 print ("not triggered")
                 time.sleep(1)
                                
+
+
+
