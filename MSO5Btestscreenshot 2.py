@@ -18,7 +18,11 @@ from tm_devices.drivers import MSO5B                        # CHANGE FOR YOUR PA
 
 # List available resources
 rm.list_resources()
+equipment = rm.list_resources()
+for i in range(len(equipment)):
+    print(equipment[i])
 os.environ["TM_OPTIONS"] = "STANDALONE"
+print()
 
 # Modify the following lines to configure this script 
 # for your needs or particular instrument
@@ -31,7 +35,7 @@ savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\"
 #==============================================
 
 with DeviceManager(verbose=True) as device_manager:
-    
+
     scope:MSO5B = device_manager.add_scope(visaResourceAddr)  # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
     print(scope.idn_string)
 
@@ -56,5 +60,9 @@ with DeviceManager(verbose=True) as device_manager:
     file.write(image_data)
     file.close()
 
+    scope.device_clear()
+    scope.close
+
+rm.close
 
 
