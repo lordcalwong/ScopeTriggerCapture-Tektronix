@@ -1,11 +1,18 @@
 # For MSO58 Series Scope
 # Connect to scope to set up, trigger, and save image.
 
+# Use time, date, and file utility packages
+import time
+import datetime
+import os
+os.environ["TM_OPTIONS"] = "STANDALONE"
+
 # Select the PyVISA-py backend
-import os       # interact with the operating system and file management
+# from gpib_ctypes import make_default_gpib
+# make_default_gpib()
 import pyvisa   # control of instruments over wide range of interfaces
+import pyserial
 rm = pyvisa.ResourceManager('@py')
-counter = 0
 
 # Use Python device management package from Tektronix
 from tm_devices import DeviceManager
@@ -13,29 +20,24 @@ from tm_devices.drivers import MSO5B                        # CHANGE FOR YOUR PA
 # from tm_devices.helpers import PYVISA_PY_BACKEND, SYSTEM_DEFAULT_VISA_BACKEND
 
 # List available resources
-rm.list_resources()
-os.environ["TM_OPTIONS"] = "STANDALONE"
+print()
+equipment = rm.list_resources()
+for i in range(len(equipment)):
+    print(equipment[i])
+print()
 
-# Use time, date, and file utility packages
-import time
-import datetime
 
 # Modify the following lines to configure this script 
 # for your needs or particular instrument
 #==============================================
 # visaResourceAddr = '10.101.100.254'   #DPO4034
 # visaResourceAddr = '10.101.100.236'   #MSO58                # CHANGE FOR YOUR PARTICULAR SCOPE!
-visaResourceAddr = '10.101.101.101'   #MSO58                # CHANGE FOR YOUR PARTICULAR SCOPE!
+visaResourceAddr = '10.101.100.93'   #MSO58                # CHANGE FOR YOUR PARTICULAR SCOPE!
 #visaResourceAddr = 'TCPIP::10.101.100.236::INSTR'
 savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\"
 #==============================================
 
-with DeviceManager(verbose=True) as device_manager:
-    
-    scope:MSO5B = device_manager.add_scope(visaResourceAddr)  # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
-    print()
-    print(scope.idn_string)
-
+def set_up_scope(device):
     scope.write("SELect:CH1 ON")
     scope.write("SELect:CH2 OFF")
     scope.write("SELect:CH3 OFF")
@@ -74,8 +76,20 @@ with DeviceManager(verbose=True) as device_manager:
     scope.write("ACQuire:MODe SAMPLE")
     scope.write("ACQuire:STOPAfter SEQuence")
 
-    # Wait for scope to finsh
+    # Wait for scope to finish
     scope.commands.opc.query()
+
+
+# ************** MAIN    
+counter = 0  # trigger counter to track data record
+with DeviceManager(verbose=True) as device_manager:
+    
+    scope:MSO5B = device_manager.add_scope(visaResourceAddr)  # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
+    print()
+    print(scope.idn_string)
+
+    # Set up scope capture subroutine for specific event(s)
+    set_up_scope(scope)
     
     # Generate a filename based on the current Date & Time
     dt = datetime.datetime.now()
@@ -107,18 +121,6 @@ with DeviceManager(verbose=True) as device_manager:
             Vrms = float(scope.query("MEASUREMENT:MEAS2:VALue?"))
             print(f"counter: {counter} Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
 
-            # # This routine works but has been deprecated in the newer scopes
-            # # Use only on Tek DPO4000/MSO4000 scopes and earlier
-            # # grab screenshot and save to file
-            # scope.write('SAVE:IMAGe:FILEFormat PNG')
-            # scope.write('HARDCOPY:INKSAVER OFF')
-            # scope.write('HARDCOPY:PORT ETHERNET')
-            # scope.write('HARDCopy START')
-            # raw_data = scope.read_raw()
-            # fid = open('my_image.png', 'wb')
-            # fid.write(raw_data)
-            # fid.close()
-
             # This routine works for the MSO5 Series
             # Create image filename 
             imagefilename = os.path.join(savePath , 'myimage.png')
@@ -126,23 +128,24 @@ with DeviceManager(verbose=True) as device_manager:
             # Save image to instrument's local disk, flash drive, or TekDrive
             scope.write('SAVE:IMAGe \"C:/Temp.png\"')
             # Wait for instrument to finish writing image to disk
+            time.sleep(5)
             scope.query('*OPC?')
             # Generate a filename based on the current Date & Time
             # dt = datetime.now()
             # fileName = dt.strftime("%YY%mm%dd_%HH%MM%SS.png")
             # Read image file from instrument
             scope.write('FILESystem:READfile \"C:/Temp.png\"')
-            scope.chunk_size = 40960
-            image_data = scope.read_raw(640*480)
+            # scope.chunk_size = 40960
+            # image_data = scope.read_raw(640*480)
+            image_data = scope.read_raw()
             # Save image data to local disk
             file = open(imagefilename, "wb")
             file.write(image_data)
             file.close()
 
-
-            # SHOULD WORK BUT DOESN'T.. .
-            # scope.commands.save.waveform.write('CH1,"example.wfm"')
-            # scope.save_screenshot("example.png")
+            # clear output buffers
+            scope.device_clear()
+            scope.close
 
             # append measured data to data file
             with open(os.path.join(savePath , fileName), "a") as datafile:
@@ -159,5 +162,4 @@ with DeviceManager(verbose=True) as device_manager:
             print ("not triggered")
             time.sleep(1)
 
-scope.close()
 rm.close()
