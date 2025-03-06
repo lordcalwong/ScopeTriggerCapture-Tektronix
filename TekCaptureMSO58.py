@@ -65,19 +65,23 @@ def set_up_scope(device):
     scope.write("CH1:OFFSet 0")
     scope.write("CH1:BANdwidth 250E6")
 
-    # Set up measurements.
-    # Clear, add measurements and set up acqusition mode.
-    # Note- This capability and nomenclature may vary by scope MFR for cursor display and making measurements.
-    scope.write("CURSor:FUNCtion OFF")
-    scope.write("MEASUrement:DELETEALL")
-    scope.write("MEASUrement:MEAS1:SOUrce1 CH1;STATE 1;TYPE PK2Pk")
-    scope.write("MEASUrement:MEAS2:SOUrce1 CH1;STATE 1;TYPE RMS")
-    scope.write("ACQuire:STATE 0")
-    scope.write("ACQuire:MODe SAMPLE")
-    scope.write("ACQuire:STOPAfter SEQuence")
+    # Turn cursor display off, set up measurements, and trigger mode
+    device.write("CURSor:FUNCtion OFF")
+    device.write("MEASUrement:DELETEALL")
+    device.write("MEASUrement:MEAS1:SOUrce1 CH1;STATE 1;TYPE PK2Pk")
+    device.write("MEASUrement:MEAS2:SOUrce1 CH1;STATE 1;TYPE RMS")
 
-    # Wait for scope to finish
-    scope.commands.opc.query()
+    # Check adequate sample rate
+    device.write("HORizontal:MODe AUTO")
+    device.write("HORizontal:SAMPLERate:ANALYZemode:MINimum:OVERRide OFF")
+    device.write("HORizontal:SAMPLERate:ANALYZemode:MINimum:VALue 3e9")
+
+    device.write("ACQuire:STATE 0")
+    device.write("ACQuire:MODe SAMPLE")
+    device.write("ACQuire:STOPAfter SEQuence")
+
+    # Wait for scope to finish setting up
+    device.commands.opc.query()
 
 
 # ************** MAIN    

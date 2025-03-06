@@ -64,8 +64,15 @@ def set_up_scope(device):
 
     # Turn cursor display off, set up measurements, and trigger mode
     device.write("CURSor:FUNCtion OFF")
+    device.write("MEASUrement:DELETEALL")
     device.write("MEASUrement:MEAS1:SOUrce1 CH1;STATE 1;TYPE PK2Pk")
     device.write("MEASUrement:MEAS2:SOUrce1 CH1;STATE 1;TYPE RMS")
+
+    # Check adequate sample rate
+    device.write("HORizontal:MODe AUTO")
+    device.write("HORizontal:SAMPLERate:ANALYZemode:MINimum:OVERRide OFF")
+    device.write("HORizontal:SAMPLERate:ANALYZemode:MINimum:VALue 3e9")
+
     device.write("ACQuire:STATE 0")
     device.write("ACQuire:MODe SAMPLE")
     device.write("ACQuire:STOPAfter SEQuence")
