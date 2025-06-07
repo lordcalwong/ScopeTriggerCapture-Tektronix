@@ -23,7 +23,7 @@ os.environ["TM_OPTIONS"] = "STANDALONE"
 #==============================================
 # visaResourceAddr = '10.101.100.254'   #DPO4034
 # visaResourceAddr = '10.101.100.236'   #MSO58                # CHANGE FOR YOUR PARTICULAR SCOPE!
-visaResourceAddr = '10.101.100.176'   #MSO58                # CHANGE FOR YOUR PARTICULAR SCOPE!
+visaResourceAddr = '10.101.100.151'   #MSO58                # CHANGE FOR YOUR PARTICULAR SCOPE!
 #visaResourceAddr = 'TCPIP::10.101.100.236::INSTR'
 savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\"
 #==============================================
@@ -54,7 +54,7 @@ with DeviceManager(verbose=True) as device_manager:
     # Save image data to local disk
     file = open(imagefilename, "wb")
     file.write(image_data)
-    file.close()
+#     file.close()
+#     scope.close()
 
-    scope.close()
-    rm.close()
+# rm.close()

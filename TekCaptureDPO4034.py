@@ -24,7 +24,7 @@ import keyboard
 # Modify following section to configure this script for scope or interface
 #==============================================
 # CHANGE FOR YOUR PARTICULAR SCOPE!
-visaResourceAddr = '10.101.100.254'     #DPO4034 BPS Bench
+visaResourceAddr = '10.101.100.151'     #DPO4034 BPS Bench
 # visaResourceAddr = '10.101.100.176'   #DPO4034
 # visaResourceAddr = '10.101.100.236'   #MSO58
 #visaResourceAddr = 'TCPIP::10.101.100.236::INSTR'
