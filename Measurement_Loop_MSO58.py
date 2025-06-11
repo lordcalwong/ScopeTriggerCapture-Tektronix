@@ -62,6 +62,10 @@ with DeviceManager(verbose=True) as device_manager:
             dt = datetime.datetime.now()
             Vp2p = float(scope.query("MEASUrement:MEAS1:VALue?"))
             Vrms = float(scope.query("MEASUrement:MEAS2:VALue?"))
+            if Vp2p > 1000:
+                Vp2p =999.999
+            if Vrms > 1000:
+                Vrms =999.999     
             print(f"counter: {counter} Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
             with open(os.path.join(SAVE_PATH, fileName), "a") as datafile:  # append mode
                 datafile.write(f"{counter:4.0f}, {dt.hour:02d}.{dt.minute:02d}.{dt.second:02d}, {Vp2p:.3f}, {Vrms:.3f}\n")

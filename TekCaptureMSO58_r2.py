@@ -2,18 +2,12 @@
 # Connect to scope to set up, trigger and wait, and 
 # save measurements and image at triggered event.
 
-
 import time
 import datetime
 import os
 import pyvisa
 from tm_devices import DeviceManager
-from tm_devices.drivers import MSO5B   # CHANGE FOR YOUR PARTICULAR SCOPE MODEL
-# Ensure TM_OPTIONS is set for standalone operation if not using
-# pyvisa.ResourceManager('@py').  This needs to be set before importing 
-# tm_devices for the first time in a session.
-# if "TM_OPTIONS" not in os.environ:
-#     os.environ["TM_OPTIONS"] = "STANDALONE"
+from tm_devices.drivers import MSO5B
 
 
 def setup_scope(scope_device: MSO5B):
@@ -137,11 +131,8 @@ if __name__ == "__main__":
         print(resource)
     print("-" * 30)
 
-    # --- Configuration ---
-    # Modify these lines to configure the script for your needs/instrument
-    # Use raw string (r"...") for Windows paths to avoid issues with backslashes
-    # CHANGE FOR YOUR PARTICULAR SCOPE IP ADDRESS, e.g., 10.101.100.236, 10.101.100.254, 10.101.100.151 
-    VISA_RESOURCE_ADDRESS = '10.101.100.151'  
+    # Configure visaResourceAddr, e.g., 'TCPIP::10.101.100.236::INSTR',  '10.101.100.236', '10.101.100.254', '10.101.100.176'
+    visaResourceAddr = '10.101.100.151'   # CHANGE FOR YOUR PARTICULAR SCOPE!
     SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop\ScopeData" # Ensure this directory exists or create it
 
     # Create save directory if it doesn't exist
@@ -150,7 +141,6 @@ if __name__ == "__main__":
     print("-" * 30)
 
     trigger_counter = 0
-
     try:
         # Use DeviceManager for robust connection management
         # The 'with' statement ensures the connection is closed automatically
