@@ -1,27 +1,23 @@
 # For MSO58 Series Scope
 # Connect to scope to set up, trigger, and save image.
 
-# Use time, date, and file utility packages
 import time
 import os
-
-# Select the PyVISA-py backend
-import pyvisa   # control of instruments over wide range of interfaces
+import pyvisa
 rm = pyvisa.ResourceManager('@py')
-
-# Use Python device management package from Tektronix
 from tm_devices import DeviceManager
-from tm_devices.drivers import MSO5B                        # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
-# from tm_devices.helpers import PYVISA_PY_BACKEND, SYSTEM_DEFAULT_VISA_BACKEND
+from tm_devices.drivers import MSO5B  # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
+
 
 # List available resources
 rm.list_resources()
 os.environ["TM_OPTIONS"] = "STANDALONE"
 
+
 # Configure visaResourceAddr, e.g., 'TCPIP::10.101.100.236::INSTR',  '10.101.100.236', '10.101.100.254', '10.101.100.176'
 visaResourceAddr = '10.101.100.151'   # CHANGE FOR YOUR PARTICULAR SCOPE!
 savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\"
-#==============================================
+
 
 with DeviceManager(verbose=True) as device_manager:
     
@@ -41,10 +37,7 @@ with DeviceManager(verbose=True) as device_manager:
     scope.write('FILESystem:READfile \"C:/Temp.png\"')
     
     image_data = scope.read_raw()
-
-    # scope.chunk_size = 40960
-    # image_data = scope.read_raw(640*480)
-    
+ 
     # Save image data to local disk
     file = open(imagefilename, "wb")
     file.write(image_data)

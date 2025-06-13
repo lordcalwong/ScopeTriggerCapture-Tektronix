@@ -1,21 +1,25 @@
 # For MSO58 Series Scope
-# Connect to scope to set up, trigger and wait, and 
-# save measurements and image at triggered event.
+# Connect to scope to set up, trigger and wait, and save measurements and image
+# at triggered events.
+# Currently speed is limited to 1 second with constant MIN_ACQUISITION_INTERVAL
+# Also, scope setup is programmatically setup with routine setup_scope() which
+# can be commented out if you rather want to use the scope's front panel.
 
 import time
 import datetime
 import os
+import keyboard
 import pyvisa
+import threading # Import the threading module
 from tm_devices import DeviceManager
 from tm_devices.drivers import MSO5B
 
+# Global flag to signal the main loop and threads to stop
+stop_program_event = threading.Event()
 
 def setup_scope(scope_device: MSO5B):
     """
     Configures the oscilloscope settings for measurement.
-
-    Args:
-        scope_device: An instance of the MSO5B oscilloscope device.
     """
     print("Setting up oscilloscope...")
     scope_device.write("SELect:CH1 ON")
@@ -82,14 +86,19 @@ def capture_data_and_image(scope_device, save_directory: str, data_file_name: st
     v_rms = float(scope_device.query("MEASUREMENT:MEAS2:VALUE?"))
     print(f"Count: {counter}, Vpk2pk: {v_peak_to_peak:.3f}, Vrms: {v_rms:.3f}")
 
-    # Define a temporary path on the instrument's internal drive
+    # Append measured data to the data file
+    try:
+        data_full_path = os.path.join(save_directory, data_file_name)
+        with open(data_full_path, "a") as f:
+            f.write(f"{counter:4.0f}, {current_dt.hour:02d}:{current_dt.minute:02d}:{current_dt.second:02d}, {v_peak_to_peak:.3f}, {v_rms:.3f}\n")
+    except IOError as e:
+        print(f"Error appending data to file '{data_full_path}': {e}")
+
+    # Save image to a temporary path on the instrument's internal drive
     temp_image_path_on_scope = "C:/Temp.png"
     scope_device.write(f'SAVE:IMAGe "{temp_image_path_on_scope}"')
-
-    # Wait for the instrument to finish writing the image to its disk
-    scope_device.query('*OPC?') # Operation Complete query
-
-    # Read image file from instrument into memory
+    time.sleep(0.2)
+    scope_device.write('FILESystem:READfile \"C:/Temp.png\"')
     image_data = scope_device.read_raw()
 
     # Generate a unique filename for the image on the local disk
@@ -100,47 +109,59 @@ def capture_data_and_image(scope_device, save_directory: str, data_file_name: st
     try:
         with open(image_file_name, "wb") as f:
             f.write(image_data)
+            f.close()
     except IOError as e:
         print(f"Error saving image file '{image_file_name}': {e}")
         # Return current counter and datetime if image saving fails
         return counter, current_dt
-
-    # --- Data Logging ---
-    # Append measured data to the data file
-    try:
-        data_full_path = os.path.join(save_directory, data_file_name)
-        with open(data_full_path, "a") as f:
-            f.write(f"{counter:4.0f}, {current_dt.hour:02d}.{current_dt.minute:02d}.{current_dt.second:02d}, {v_peak_to_peak:.3f}, {v_rms:.3f}\n")
-    except IOError as e:
-        print(f"Error appending data to file '{data_full_path}': {e}")
-
-    # Clear output buffers
-    scope_device.device_clear()
-
     return counter + 1, current_dt
 
+
+def timer_thread_func(event: threading.Event, interval: float):
+    """
+    Separate thread for MIN_ACQUISITION_INTERVAL wait time
+    """
+    while True:
+        # using event.wait with a timeout to allow for stop_program_event check
+        if event.wait(timeout=interval):
+            if stop_program_event.is_set():
+                break 
+            event.clear() # Reset the event for the next cycle
+
+
+def on_q_press():
+    """Callback function when 'q' is pressed."""
+    print("\n'q' pressed. Signaling program to stop.")
+    stop_program_event.set()
+
+
 if __name__ == "__main__":
-    # Initialize PyVISA Resource Manager
-    # Use '@py' for the PyVISA-py backend
-    resource_manager = pyvisa.ResourceManager('@py')
-
-    # List available resources for debugging/verification
-    print("\nAvailable VISA Resources:")
-    equipment_list = resource_manager.list_resources()
-    for resource in equipment_list:
-        print(resource)
-    print("-" * 30)
-
     # Configure visaResourceAddr, e.g., 'TCPIP::10.101.100.236::INSTR',  '10.101.100.236', '10.101.100.254', '10.101.100.176'
-    visaResourceAddr = '10.101.100.151'   # CHANGE FOR YOUR PARTICULAR SCOPE!
+    VISA_RESOURCE_ADDRESS = '10.101.100.151'   # CHANGE FOR YOUR PARTICULAR SCOPE!
     SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop\ScopeData" # Ensure this directory exists or create it
+    MIN_ACQUISITION_INTERVAL = 1.0  #Desired minimum delay time in seconds between acquisitions
 
     # Create save directory if it doesn't exist
     os.makedirs(SAVE_PATH, exist_ok=True)
     print(f"Data and images will be saved to: {SAVE_PATH}")
     print("-" * 30)
 
-    trigger_counter = 0
+    trigger_counter = 1
+
+    # Create an Event object to signal when the minimum interval has passed
+    acquisition_allowed_event = threading.Event()
+
+    # Start the timer thread
+    timer_thread = threading.Thread(
+        target=timer_thread_func,
+        args=(acquisition_allowed_event, MIN_ACQUISITION_INTERVAL),
+        daemon=True # Daemon threads exit automatically when the main program exits
+    )
+    timer_thread.start()
+
+    # Register the 'q' hotkey
+    keyboard.add_hotkey('q', on_q_press)
+
     try:
         # Use DeviceManager for robust connection management
         # The 'with' statement ensures the connection is closed automatically
@@ -166,37 +187,41 @@ if __name__ == "__main__":
 
             # Initial trigger to start acquisition
             scope.write("ACQUIRE:STATE 1")
-            print("Scope acquisition started. Waiting for triggers...")
+            print("Scope acquisition started. Waiting for trigger.  Press 'q' to quit.")
 
             # Trigger Capture Loop
-            while True:
-                # Poll acquisition state. Use .strip() to remove whitespace/newline characters.
-                acquisition_status = scope.query('ACQUIRE:STATE?').strip()
-
-                if acquisition_status == '0':  # Scope triggered and acquisition complete
-                    print("Triggered!")
-                    trigger_counter, _ = capture_data_and_image(
-                        scope, SAVE_PATH, data_log_file_name, trigger_counter
-                    )
-
-                    # Allow time for saving before re-triggering for the next sequence
-                    time.sleep(2)
-                    # Re-arm the acquisition for the next trigger
-                    scope.write("ACQUIRE:STATE 1")
-                    time.sleep(1) # Small delay to allow scope to re-arm
-
-                else:  # Still waiting for a trigger
+            while  not stop_program_event.is_set():
+                # Acquiring ..
+                while scope.query('ACQUIRE:STATE?').strip() == '1' and not stop_program_event.is_set():
                     print("Not triggered yet, waiting...")
-                    time.sleep(1) # Wait before polling again
+                    time.sleep(0.1)
+                                  
+                # Triggered
+                # Check stop_program_event (again after the inner loop potentially breaks)
+                if stop_program_event.is_set(): 
+                    break
+                # Check minimum interval
+                print(f"Trigger detected. Waiting for {MIN_ACQUISITION_INTERVAL}s interval...")
+                acquisition_allowed_event.set() # Signal the timer thread to start its countdown
+
+                # Proceed processing the trigger
+                trigger_counter, _ = capture_data_and_image(
+                    scope, SAVE_PATH, data_log_file_name, trigger_counter
+                )
+
+                # Re-arm the acquisition for the next trigger
+                scope.write("ACQUIRE:STATE 1")
+                time.sleep(0.1)
+
 
     except pyvisa.errors.VisaIOError as e:
         print(f"VISA I/O Error: {e}")
-        print("Please ensure the oscilloscope is connected and the IP address is correct.")
+        print("Ensure oscilloscope is connected and IP address is correct. May need to send CLEAR via Windows PowerShell & ncat or recycle power")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
     finally:
         # Resource Manager is closed here even if an error occurs
-        if 'resource_manager' in locals() and resource_manager:
-            print("\nClosing VISA Resource Manager.")
-            resource_manager.close()
+        # if 'resource_manager' in locals() and resource_manager:
+        #     print("\nClosing VISA Resource Manager.")
+        #     resource_manager.close()
         print("Script finished.")
