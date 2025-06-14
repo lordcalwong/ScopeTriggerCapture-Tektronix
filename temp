@@ -198,7 +198,6 @@ if __name__ == "__main__":
                 while scope.query('ACQUIRE:STATE?').strip() == '1' and not stop_program_event.is_set():
                     time.sleep(0.05) # Shorter sleep for responsiveness
                     if stop_program_event.is_set(): # Check if 'q' was pressed while waiting for trigger
-                        # may need to flush scope buffer
                         break
 
                 trigger_counter, _ = capture_data_and_image(
