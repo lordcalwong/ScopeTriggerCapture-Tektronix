@@ -1,4 +1,4 @@
-# For MSO58 Series Scope
+# For MSO58 Series Scope   (MSO5B and higher, not DPO4KB)
 # Connect to scope to set up, trigger and wait, and save measurements and image
 # at triggered events.
 # Currently speed is limited to 1 second with constant MIN_ACQUISITION_INTERVAL
@@ -84,6 +84,10 @@ def capture_data_and_image(scope_device, save_directory: str, data_file_name: st
     # Get measured data
     v_peak_to_peak = float(scope_device.query("MEASUREMENT:MEAS1:VALUE?"))
     v_rms = float(scope_device.query("MEASUREMENT:MEAS2:VALUE?"))
+    if v_peak_to_peak > 999:
+        v_peak_to_peak = 999
+    if v_rms > 999:
+        v_rms = 999
     print(f"Count: {counter}, Vpk2pk: {v_peak_to_peak:.3f}, Vrms: {v_rms:.3f}")
 
     # Append measured data to the data file
@@ -122,9 +126,14 @@ def timer_thread_func(event_to_set: threading.Event, interval: float, stop_event
     Separate thread that signals an event after the specified interval.
     """
     while not stop_event.is_set():
-        time.sleep(interval)
-        if not stop_event.is_set(): # Check again in case stop was set during sleep
-            event_to_set.set() # Signal that the interval has passed
+        # Wait for the interval, but allow to be interrupted by stop_event
+        # If stop_event is set during this wait, it will return True immediately.
+        if stop_event.wait(interval):
+            break # Exit the loop if stop_event was set
+        # If the wait completed (meaning interval passed and stop_event wasn't set),
+        # then set the event for the main thread.
+        if not stop_event.is_set(): 
+            event_to_set.set()
 
 
 def on_q_press():
@@ -134,9 +143,9 @@ def on_q_press():
 
 
 if __name__ == "__main__":
-    # Configure visaResourceAddr, e.g., 'TCPIP::10.101.100.236::INSTR',  '10.101.100.236', '10.101.100.254', '10.101.100.176'
+    # Configure visaResourceAddr, e.g., '192.168.1.53', '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176'
     VISA_RESOURCE_ADDRESS = '10.101.100.151'   # CHANGE FOR YOUR PARTICULAR SCOPE!
-    SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop\ScopeData" # Ensure this directory exists or create it
+    SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop\ScopeData" # Ensure this direqctory exists or create it
     MIN_ACQUISITION_INTERVAL = 1.0  #Desired minimum delay time in seconds between acquisitions
 
     # Create save directory if it doesn't exist
@@ -159,12 +168,14 @@ if __name__ == "__main__":
 
     # Register the 'q' hotkey
     keyboard.add_hotkey('q', on_q_press)
+    
+    scope = None  # Initialize scope to None
+    device_manager = None # Initialize device_manager to None
 
     try:
         # Use DeviceManager for robust connection management
         # The 'with' statement ensures the connection is closed automatically
         with DeviceManager(verbose=True) as device_manager:
-            # Add your scope device. Ensure the driver matches your specific model (e.g., MSO5B)
             scope: MSO5B = device_manager.add_scope(VISA_RESOURCE_ADDRESS)
             print(f"\nConnected to: {scope.idn_string}")
 
@@ -189,22 +200,36 @@ if __name__ == "__main__":
             while  not stop_program_event.is_set():
                 # Wait for the minimum acquisition interval to pass before arming
                 print(f"Waiting for MIN_ACQUISITION_INTERVAL ({MIN_ACQUISITION_INTERVAL}s)...")
-                acquisition_allowed_event.wait() # This will block until the timer thread sets the event
+                acquisition_allowed_event.wait(timeout=0.1) # This will block until the timer thread sets the event
+
+                if stop_program_event.is_set(): # Check immediately after waiting
+                    break
+
+                if not acquisition_allowed_event.is_set():
+                    # If the event wasn't set, it means the wait timed out, and we should loop again
+                    # and continue waiting for the interval to pass or q to be pressed.
+                    continue
+
                 acquisition_allowed_event.clear() # Reset the event for the next cycle
 
                 # Re-arm the acquisition for the next trigger
                 scope.write("ACQUIRE:STATE 1")
                 print("Scope re-armed. Waiting for trigger...")
+                
+                # Wait for acquisition to complete or stop signal
                 while scope.query('ACQUIRE:STATE?').strip() == '1' and not stop_program_event.is_set():
                     time.sleep(0.05) # Shorter sleep for responsiveness
-                    if stop_program_event.is_set(): # Check if 'q' was pressed while waiting for trigger
-                        # may need to flush scope buffer
-                        break
 
+                if stop_program_event.is_set(): # Check if 'q' was pressed while waiting for trigger
+                    # If 'q' was pressed, stop the acquisition on the scope
+                    scope.write("ACQUIRE:STATE 0")
+                    scope.write("CLEAR")
+                    break
+
+                # Triggered event occurred, capture data and image
                 trigger_counter, _ = capture_data_and_image(
                     scope, SAVE_PATH, data_log_file_name, trigger_counter
                 )
-
 
     except pyvisa.errors.VisaIOError as e:
         print(f"VISA I/O Error: {e}")
@@ -212,8 +237,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
     finally:
-        # Resource Manager is closed here even if an error occurs
-        # if 'resource_manager' in locals() and resource_manager:
-        #     print("\nClosing VISA Resource Manager.")
-        #     resource_manager.close()
+        # Unregister the hotkey to prevent issues after the program exits
+        keyboard.unhook_all_hotkeys()
         print("Script finished.")

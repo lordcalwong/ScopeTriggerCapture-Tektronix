@@ -18,20 +18,22 @@ os.environ["TM_OPTIONS"] = "STANDALONE"
 
 # Packages used
 import time
+import os
 import datetime
 import keyboard
 
-# Modify following section to configure this script for scope or interface
-#==============================================
-# CHANGE FOR YOUR PARTICULAR SCOPE!
-visaResourceAddr = '10.101.100.151'     #DPO4034 BPS Bench
-# visaResourceAddr = '10.101.100.176'   #DPO4034
-# visaResourceAddr = '10.101.100.236'   #MSO58
-#visaResourceAddr = 'TCPIP::10.101.100.236::INSTR'
+
+# Configure visaResourceAddr, e.g., '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176' 
+visaResourceAddr = '192.168.1.53'     # CHANGE FOR YOUR PARTICULAR SCOPE!
 savePath = "C:\\Users\\Calvert.Wong\\OneDrive - qsc.com\\Desktop\\DATA"       # CHANGE TO YOUR PREFERRED DESTINATION
-#==============================================
+
 
 def set_up_scope(device):
+
+    # Clear settings
+    device.write("*RST")
+    device.commands.opc.query()
+
     # Set up dispaly channels
     device.write("SELect:CH1 ON")
     device.write("SELect:CH2 OFF")
@@ -56,7 +58,7 @@ def set_up_scope(device):
     device.write("CH1:COUPling DC")
     device.write("CH1:PRObe:GAIN 0.1")
     device.write("CH1:TERmination MEG")
-    device.write("CH1:SCALe 0.5")
+    device.write("CH1:SCALe 1")
     device.write("CH1:INVert OFF")
     device.write("CH1:POSition -2")
     device.write("CH1:OFFSet 0")
@@ -99,6 +101,10 @@ with DeviceManager(verbose=True) as device_manager:
     # Trigger scope and start recording
     scope.write("ACQuire:STATE 1")
 
+    # Create save directory if it doesn't exist
+    os.makedirs(savePath, exist_ok=True)
+    print(f"Data and images will be saved to: {savePath}")
+    print("-" * 30)
     # Create data file with header
     with open(os.path.join(savePath , fileName), "w") as datafile:
         datafile.write("Count, Time, Vpk2pk, Vrms\n")
@@ -113,8 +119,10 @@ with DeviceManager(verbose=True) as device_manager:
                 break
 
             Status = scope.query('ACQuire:STATE?')
+
             if Status == '0' :  
                 # Scope triggered
+                scope.write("TRIGger:A:LEVel:CH1 4.0")
                 print ("triggered")
                 counter += 1
 
@@ -124,7 +132,13 @@ with DeviceManager(verbose=True) as device_manager:
                 # Get measured data and display for user
                 Vp2p = float(scope.query("MEASUREMENT:MEAS1:VALue?"))
                 Vrms = float(scope.query("MEASUREMENT:MEAS2:VALue?"))
+
                 print(f"counter: {counter} Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
+
+                # Append measured data to data file
+                with open(os.path.join(savePath , fileName), "a") as datafile:
+                    datafile.write(f"{counter:4.0f}, {dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}, {Vp2p:.3f}, {Vrms:.3f}\n")
+                    datafile.close()
 
                 # Grab screenshot and save to file
                 scope.write('SAVE:IMAGe:FILEFormat PNG')
@@ -132,7 +146,7 @@ with DeviceManager(verbose=True) as device_manager:
                 scope.write('HARDCOPY:PORT ETHERNET')
                 scope.write('HARDCopy START')
                 raw_data = scope.read_raw()
-                imgfileName = dt.strftime("%Y%m%d %H.%M.%S.png")
+                imgfileName = dt.strftime("%Y%m%d_%H.%M.%S.png")
                 imgfilePath = os.path.join(savePath , imgfileName)
                 fid = open(imgfilePath, 'wb')
                 fid.write(raw_data)
@@ -141,20 +155,16 @@ with DeviceManager(verbose=True) as device_manager:
                 # HARDCOPY may be depricated on newer scopes.
                 # SHOULD WORK BUT DOESN'T.. . is scope.save_screenshot("example.png")
 
-                # Append measured data to data file
-                with open(os.path.join(savePath , fileName), "a") as datafile:
-                    datafile.write(f"{counter:4.0f}, {dt.hour:02d}.{dt.minute:02d}.{dt.second:02d}, {Vp2p:.3f}, {Vrms:.3f}\n")
-                    datafile.close()
-
                 # Allow time for save before allowing re-triggering, single-mode
-                time.sleep(2)
+                time.sleep(0.5)
                 scope.write("ACQuire:STATE 1")
 
                 # Allow time for scope to set up for trigger 
-                time.sleep(2)
+                time.sleep(0.5)
 
             else:   # Still waiting for a trigger
                 # Notify user of status and/or allow user input for other functions
                 print ("not triggered")
-                time.sleep(1)
+                scope.write("TRIGger:A:LEVel:CH1 2.0")
+                time.sleep(0.5)
                                

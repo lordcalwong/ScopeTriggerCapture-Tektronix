@@ -1,4 +1,4 @@
-# For MSO58 Series Scope
+# For MSO58 Series Scope   (MSO5B and higher, not DPO4KB)
 # Connect to scope to set up, trigger and wait, and save measurements and image
 # at triggered events.
 # Currently speed is limited to 1 second with constant MIN_ACQUISITION_INTERVAL
@@ -42,8 +42,8 @@ def setup_scope(scope_device: MSO5B):
     scope_device.write("TRIGger:A:MODe NORMal")
     scope_device.write("TRIGger:A:TYPe EDGE")
     scope_device.write("HORizontal:MODe AUTO")
-    scope_device.write("HORizontal:SAMPLERate:ANALYZemode:MINimum:VALue 250e6")   # set MIN sample rate
-    scope_device.write("HORizontal:SAMPLERate:ANALYZemode:MINimum:OVERRide ON")   # but allow horizontal scale override
+    scope_device.write("HORizontal:SAMPLERate:ANALYZemode:MINimum:VALue 250e6")  # set MIN sample rate
+    scope_device.write("HORizontal:SAMPLERate:ANALYZemode:MINimum:OVERRide ON")  # but allow horizontal scale override
     scope_device.write("HORizontal:MODe SCALE 400E-6")
     scope_device.write("DISplay:WAVEView1:CH1:VERTical:SCAle 0.5")
     scope_device.write("DISplay:WAVEView1:CURSor:CURSOR1:STATE 0")
@@ -84,6 +84,10 @@ def capture_data_and_image(scope_device, save_directory: str, data_file_name: st
     # Get measured data
     v_peak_to_peak = float(scope_device.query("MEASUREMENT:MEAS1:VALUE?"))
     v_rms = float(scope_device.query("MEASUREMENT:MEAS2:VALUE?"))
+    if v_peak_to_peak > 999:
+        v_peak_to_peak = 999
+    if v_rms > 999:
+        v_rms = 999
     print(f"Count: {counter}, Vpk2pk: {v_peak_to_peak:.3f}, Vrms: {v_rms:.3f}")
 
     # Append measured data to the data file
@@ -120,11 +124,18 @@ def capture_data_and_image(scope_device, save_directory: str, data_file_name: st
 def timer_thread_func(event_to_set: threading.Event, interval: float, stop_event: threading.Event):
     """
     Separate thread that signals an event after the specified interval.
+    Uses event.wait() with a timeout to allow for graceful exit.
     """
     while not stop_event.is_set():
-        time.sleep(interval)
-        if not stop_event.is_set(): # Check again in case stop was set during sleep
-            event_to_set.set() # Signal that the interval has passed
+        # Wait for the interval, but allow to be interrupted by stop_event
+        # If stop_event is set during this wait, it will return True immediately.
+        if stop_event.wait(interval):
+            break # Exit the loop if stop_event was set
+        
+        # If the wait completed (meaning interval passed and stop_event wasn't set),
+        # then set the event for the main thread.
+        if not stop_event.is_set(): 
+            event_to_set.set()
 
 
 def on_q_press():
@@ -134,8 +145,8 @@ def on_q_press():
 
 
 if __name__ == "__main__":
-    # Configure visaResourceAddr, e.g., 'TCPIP::10.101.100.236::INSTR',  '10.101.100.236', '10.101.100.254', '10.101.100.176'
-    VISA_RESOURCE_ADDRESS = '10.101.100.151'   # CHANGE FOR YOUR PARTICULAR SCOPE!
+    # Configure visaResourceAddr, e.g., '192.168.1.53', '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176'
+    VISA_RESOURCE_ADDRESS = '10.101.100.151'  # CHANGE FOR YOUR PARTICULAR SCOPE!
     SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop\ScopeData" # Ensure this directory exists or create it
     MIN_ACQUISITION_INTERVAL = 1.0  #Desired minimum delay time in seconds between acquisitions
 
@@ -160,50 +171,73 @@ if __name__ == "__main__":
     # Register the 'q' hotkey
     keyboard.add_hotkey('q', on_q_press)
 
+    scope = None # Initialize scope to None for safe cleanup in finally
+    device_manager = None # Initialize device_manager to None for safe cleanup in finally
+
     try:
         # Use DeviceManager for robust connection management
         # The 'with' statement ensures the connection is closed automatically
-        with DeviceManager(verbose=True) as device_manager:
-            # Add your scope device. Ensure the driver matches your specific model (e.g., MSO5B)
-            scope: MSO5B = device_manager.add_scope(VISA_RESOURCE_ADDRESS)
-            print(f"\nConnected to: {scope.idn_string}")
+        device_manager = DeviceManager(verbose=True)
+        scope: MSO5B = device_manager.add_scope(VISA_RESOURCE_ADDRESS)
+        print(f"\nConnected to: {scope.idn_string}")
 
-            # Configure scope settings for capture
-            setup_scope(scope)
+        # Configure scope settings for capture
+        setup_scope(scope)
 
-            # Generate a filename for the data based on start date and time
-            data_log_file_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S.txt")
-            full_data_path = os.path.join(SAVE_PATH, data_log_file_name)
+        # Generate a filename for the data based on start date and time
+        data_log_file_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S.txt")
+        full_data_path = os.path.join(SAVE_PATH, data_log_file_name)
 
-            # Create data file with header if it doesn't exist
-            if not os.path.exists(full_data_path):
-                print(f"Creating new data file: {full_data_path}")
-                with open(full_data_path, "w") as datafile:
-                    datafile.write("Count, Time, Vpk2pk, Vrms\n")
-            else:
-                print(f"Appending to existing data file: {full_data_path}")
+        # Create data file with header if it doesn't exist
+        if not os.path.exists(full_data_path):
+            print(f"Creating new data file: {full_data_path}")
+            with open(full_data_path, "w") as datafile:
+                datafile.write("Count, Time, Vpk2pk, Vrms\n")
+        else:
+            print(f"Appending to existing data file: {full_data_path}")
 
-            print("Scope acquisition starting. Press 'q' to quit.")
+        print("Scope acquisition starting. Press 'q' to quit.")
 
-            # Main loop
-            while  not stop_program_event.is_set():
-                # Wait for the minimum acquisition interval to pass before arming
-                print(f"Waiting for MIN_ACQUISITION_INTERVAL ({MIN_ACQUISITION_INTERVAL}s)...")
-                acquisition_allowed_event.wait() # This will block until the timer thread sets the event
-                acquisition_allowed_event.clear() # Reset the event for the next cycle
+        # Main loop
+        while not stop_program_event.is_set():
+            # Wait for the minimum acquisition interval to pass before arming
+            print(f"Waiting for MIN_ACQUISITION_INTERVAL ({MIN_ACQUISITION_INTERVAL}s)...")
+            
+            # Use wait() with a short timeout to allow the loop to check stop_program_event periodically.
+            # This makes the main loop responsive to 'q' without forcing an immediate break.
+            acquisition_allowed_event.wait(timeout=0.1) # Check every 0.1s
+            
+            # If the event was not set (meaning the timeout elapsed without the timer thread signaling),
+            # or if stop_program_event was set, we should re-check the main loop condition.
+            if not acquisition_allowed_event.is_set() and not stop_program_event.is_set():
+                continue # Keep waiting for the interval to pass or 'q' to be pressed
+            
+            # If stop_program_event was set during the wait for acquisition_allowed_event
+            if stop_program_event.is_set():
+                print("Stop event detected after acquisition interval wait.")
+                break # Exit the main loop
 
-                # Re-arm the acquisition for the next trigger
-                scope.write("ACQUIRE:STATE 1")
-                print("Scope re-armed. Waiting for trigger...")
-                while scope.query('ACQUIRE:STATE?').strip() == '1' and not stop_program_event.is_set():
-                    time.sleep(0.05) # Shorter sleep for responsiveness
-                    if stop_program_event.is_set(): # Check if 'q' was pressed while waiting for trigger
-                        break
+            acquisition_allowed_event.clear() # Reset the event for the next cycle
 
-                trigger_counter, _ = capture_data_and_image(
-                    scope, SAVE_PATH, data_log_file_name, trigger_counter
-                )
+            # Re-arm the acquisition for the next trigger
+            scope.write("ACQUIRE:STATE 1")
+            print("Scope re-armed. Waiting for trigger...")
+            
+            # Wait for acquisition to complete or stop signal, with periodic checks for stop_program_event
+            while scope.query('ACQUIRE:STATE?').strip() == '1':
+                if stop_program_event.is_set(): # Check if 'q' was pressed while waiting for trigger
+                    print("Stop event detected while waiting for trigger. Stopping scope acquisition.")
+                    scope.write("ACQUIRE:STATE 0") # Send command to stop acquisition on scope
+                    break # Exit the inner loop
+                time.sleep(0.05) # Shorter sleep for responsiveness
+            
+            if stop_program_event.is_set(): # Check again after inner loop in case it broke due to 'q'
+                break # Exit the main loop
 
+            # Triggered event occurred, capture data and image
+            trigger_counter, _ = capture_data_and_image(
+                scope, SAVE_PATH, data_log_file_name, trigger_counter
+            )
 
     except pyvisa.errors.VisaIOError as e:
         print(f"VISA I/O Error: {e}")
@@ -211,8 +245,15 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
     finally:
-        # Resource Manager is closed here even if an error occurs
-        # if 'resource_manager' in locals() and resource_manager:
-        #     print("\nClosing VISA Resource Manager.")
-        #     resource_manager.close()
+        print("Entering finally block...")
+        # Unregister the hotkey
+        keyboard.unhook_all_hotkeys() 
+        # Ensure the acquisition is stopped on the scope
+        if scope:
+            print("Stopping scope acquisition...")
+            scope.write("ACQUIRE:STATE 0") # Explicitly stop acquisition
+            scope.write("CLEAR") # Flush scope buffer
+        if device_manager:
+            print("Closing device manager...")
+            device_manager.close()  # Close the device manager
         print("Script finished.")

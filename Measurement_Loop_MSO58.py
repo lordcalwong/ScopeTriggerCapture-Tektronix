@@ -73,12 +73,12 @@ with DeviceManager(verbose=True) as device_manager:
 
             # ready next trigger
             scope.write("ACQuire:STATE ON")
-            time.sleep(2)  # wait before checking again
+            time.sleep(1)  # wait before checking again
         else:
             # print ("not triggered")
             scope.write("TRIGger:A:LEVel:CH1 2.0")
             scope.write("ACQuire:STATE ON")
-            time.sleep(2)  # wait before checking again
+            time.sleep(1)  # wait before checking again
 
 rm.close()
 
