@@ -6,15 +6,16 @@
 import os       # interact with the operating system and file management
 import pyvisa   # control of instruments over wide range of interfaces
 rm = pyvisa.ResourceManager('@py')
+# List available resources
+rm.list_resources()
+os.environ["TM_OPTIONS"] = "STANDALONE"
+
 
 # Use Python device management package from Tektronix
 # from tm_devices.helpers import PYVISA_PY_BACKEND, SYSTEM_DEFAULT_VISA_BACKEND
 from tm_devices import DeviceManager
-from tm_devices.drivers import MSO4                            # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
+from tm_devices.drivers import MSO4     # CHANGE FOR YOUR PARTICULAR SCOPE USING Intellisense!
 
-# List available resources
-rm.list_resources()
-os.environ["TM_OPTIONS"] = "STANDALONE"
 
 # Packages used
 import time
