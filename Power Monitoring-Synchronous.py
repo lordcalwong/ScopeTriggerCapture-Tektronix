@@ -16,6 +16,12 @@ import os
 import keyboard
 import pyvisa
 import threading
+import csv
+from openpyxl import Workbook
+from openpyxl.chart import ScatterChart, Reference, Series
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.text import Paragraph, CharacterProperties, Font
+from openpyxl.styles import Font as ExcelFont
 
 # Configure IP '192.168.1.53', '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176'
 DEFAULT_IP_ADDRESS = '192.168.1.53'   # CHANGE FOR YOUR PARTICULAR SCOPE!
@@ -112,20 +118,6 @@ def get_num_channels():
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-def get_max_graph_voltage():
-    """
-    Asks the user to input the number of channels (1-8).
-    """
-    while True:
-        try:
-            num_channels = int(input("Enter the number of channels to monitor (1-8): "))
-            if 1 <= num_channels <= 8:
-                return num_channels
-            else:
-                print("Invalid input. Please enter a number between 1 and 8.")
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-
 def sample_period():
     """
     Asks user to input the time between samples.
@@ -139,8 +131,10 @@ def sample_period():
                 period = int(sample_period)
                 if 1 <= period <= 300:
                     return period
+                else:
+                    print("Invalid input. Please enter a number between 1 and 300.")
         except ValueError:
-            print("Invalid input. Please enter a number between 1 and 300.")
+            print("Invalid input. Please enter a number.")
 
 def setup_scope(scope_device, num_channels):
     """
@@ -149,16 +143,11 @@ def setup_scope(scope_device, num_channels):
     """
     print("Setting up oscilloscope...", end='')
     
-    # # Clear existing measurements to avoid conflicts
-    # scope_device.write("MEASUrement:CLEarALL")
-
     for i in range(1, num_channels + 1):
         scope_device.write(f"SELect:CH{i} ON")
         scope_device.write(f"CH{i}:SCALe 10")
         scope_device.write(f"CH{i}:POSition -4")
-        # scope_device.write(f"MEASUrement:MEAS{i}:ENABle ON")
-        # scope_device.write(f"MEASUrement:MEAS{i}:SOUrce1 CH{i}; STATE 1; TYPE RMS")  #works for DPO4K
-        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")  #works for MSO5
+        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")
 
     # Wait for scope to finish setting up
     scope_device.query("*OPC?")
@@ -203,6 +192,65 @@ def apply_vrms_bounds(v_rms):
     """
     return max(min(v_rms, MAX_VRMS), 0)
 
+def write_to_excel_with_chart(datafile_name: str, save_directory: str, num_channels: int):
+    """
+    Reads data from the specified CSV file, writes it to an Excel worksheet,
+    and creates a scatter chart.
+
+    Args:
+        datafile_name: The name of the CSV data file (e.g., "20250618_120000.txt").
+        save_directory: The directory where the CSV and Excel files are saved.
+        num_channels: The number of Vrms channels recorded.
+    """
+    full_csv_path = os.path.join(save_directory, datafile_name)
+    excel_file_name = os.path.splitext(datafile_name)[0] + ".xlsx"
+    full_excel_path = os.path.join(save_directory, excel_file_name)
+
+    print(f"\nAttempting to create Excel file: {full_excel_path}")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Power Monitoring Data"
+
+    try:
+        with open(full_csv_path, 'r') as f:
+            reader = csv.reader(f)
+            # Write header row
+            header = next(reader)
+            ws.append(header)
+
+            # Write data rows
+            for row in reader:
+                ws.append(row)
+        print("Data successfully written to Excel worksheet.")
+
+        # --- Charting Section ---
+        chart = ScatterChart()
+        chart.title = "Vrms Over Time"
+        chart.style = 10
+        chart.x_axis.title = "Time (seconds)"
+        chart.y_axis.title = "Vrms"
+        max_row = ws.max_row
+        # Start from column 3 (index 2 in 0-based) for Vrms_CH1
+        for i in range(num_channels):
+            # X-axis: Time (column B, index 1)
+            x_values = Reference(ws, min_col=2, min_row=2, max_row=max_row)
+            # Y-axis: Vrms for the current channel (starting from column C, index 2)
+            y_values = Reference(ws, min_col=3 + i, min_row=2, max_row=max_row)
+            series = Series(y_values, x_values, title=f"Vrms_CH{i+1}")
+            chart.series.append(series)
+        # Add the chart to the worksheet
+        ws.add_chart(chart, "E2") # Adjust cell to place the chart as needed
+        # --- End Charting Section ---
+
+        wb.save(full_excel_path)
+        print(f"Excel data and chart saved successfully to: {full_excel_path}")
+
+    except FileNotFoundError:
+        print(f"Error: CSV data file not found at {full_csv_path}. Cannot create Excel file.")
+    except Exception as e:
+        print(f"An error occurred while creating the Excel file: {e}")
+
 # --- MAIN ---
 if __name__ == "__main__":
     # Initialize the Resource Manager
@@ -225,6 +273,7 @@ if __name__ == "__main__":
     
     num_channels_to_monitor = 0
     connected_instrument = None
+    datafile_name = None # Initialize datafile_name to None
     try:
         # Call the new function to connect to the instrument
         connected_instrument = connect_to_instrument(rm, DEFAULT_IP_ADDRESS)
@@ -237,8 +286,8 @@ if __name__ == "__main__":
 
         # Create a data file for logging
         starting_date_and_time = datetime.datetime.now()
-        datafile = make_datafile(num_channels_to_monitor, starting_date_and_time)
-        print("Created file for data as ", datafile)
+        datafile_name = make_datafile(num_channels_to_monitor, starting_date_and_time)
+        print("Created file for data as ", datafile_name)
         
         count = 1
         # Main loop
@@ -271,7 +320,7 @@ if __name__ == "__main__":
                     print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
                     v_rms_readings.append(float('NAN'))
 
-            add_sample_to_file(SAVE_PATH, datafile, count, dt_in_seconds, v_rms_readings)
+            add_sample_to_file(SAVE_PATH, datafile_name, count, dt_in_seconds, v_rms_readings)
             
             # Print the current sample data
             print_output = f"Sample {count:4d},   Time: {dt_in_seconds:9.3f} sec"
@@ -298,3 +347,7 @@ if __name__ == "__main__":
         if rm:
             print("Closing Resource Manager.")
             rm.close()
+        
+        # After data acquisition stops, write to Excel if a datafile was created
+        if datafile_name and num_channels_to_monitor > 0:
+            write_to_excel_with_chart(datafile_name, SAVE_PATH, num_channels_to_monitor)
