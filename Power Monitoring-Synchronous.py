@@ -1,14 +1,14 @@
 # Power Monitoring- Synchronous
 #
 # Continuous monitor Amplifier Output channels and/or Line Inputs with
-# asynchronous ON and OFF time logging. Configure all measurements on scope
-# to be # RMS readings (~10V/div and ~trigger level of 10V).
+# synchronous logging with input from user (seconds) or default of 5 seconds.
+# Configure all measurements on scope as RMS readings (~10V/div and 
+# ~trigger level of 10V) in autorun mode.
 # Trigger level is 18W/ch (9.8V) ON and 1V/ch OFF.
-# autorun.
-# Keeps track of number of valid cycles. 
+# Saves data to csv file and then makes a MS Excel file with chart.
 # Uses pyvisa for generic scope SCPI communications.
 #
-# Author: C. Wong 2025XXXX
+# Author: C. Wong 20250701
 
 import time
 import datetime
@@ -25,7 +25,7 @@ from openpyxl.styles import Font as ExcelFont
 
 # Configure IP '192.168.1.53', '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176'
 DEFAULT_IP_ADDRESS = '192.168.1.53'   # CHANGE FOR YOUR PARTICULAR SCOPE!
-SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop"
+SAVE_PATH = r"C:\Users\calve\Desktop"  #C:\Users\calve\Desktop or C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop
 MIN_ACQUISITION_INTERVAL = 5   # sampling rate
 MAX_VRMS = 300
 
@@ -69,7 +69,7 @@ def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: 
     my_instrument = None
     while my_instrument is None:
         ip_address_input = input(
-            f"Enter the instrument's IP address (e.g., {default_ip}) or 'd' for default: "
+            f"Enter the instrument's IP address or 'd' for default ({default_ip}): "
         ).strip()
 
         if ip_address_input.lower() == 'd':
@@ -118,15 +118,15 @@ def get_num_channels():
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-def sample_period():
+def sample_period(default_sample_time: str = MIN_ACQUISITION_INTERVAL):
     """
     Asks user to input the time between samples.
     """
     while True:
         try:
-            sample_period = input("Enter time between samples in seconds (e.g., 1-300 or {MIN_ACQUISITION_INTERVAL}) or 'd' for default: ").strip()
+            sample_period = input("Enter time between samples in seconds (1-300) or 'd' for default ({MIN_ACQUISITION_INTERVAL} sec) : ").strip()
             if sample_period.lower() == 'd':
-                return MIN_ACQUISITION_INTERVAL
+                return default_sample_time
             else:
                 period = int(sample_period)
                 if 1 <= period <= 300:
@@ -147,7 +147,7 @@ def setup_scope(scope_device, num_channels):
         scope_device.write(f"SELect:CH{i} ON")
         scope_device.write(f"CH{i}:SCALe 10")
         scope_device.write(f"CH{i}:POSition -4")
-        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")
+        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1; TYPE RMS")   # Need STATE 1 for DPO 
 
     # Wait for scope to finish setting up
     scope_device.query("*OPC?")
@@ -255,9 +255,9 @@ def write_to_excel_with_chart(datafile_name: str, save_directory: str, num_chann
 if __name__ == "__main__":
     # Initialize the Resource Manager
     rm = pyvisa.ResourceManager('@py')
-    print(rm.list_resources())
+    print("Resources found " , rm.list_resources())
 
-    sample_time = sample_period()
+    sample_time = sample_period(MIN_ACQUISITION_INTERVAL)
 
     # Create Event object for sampling time and start timer
     acquisition_allowed_event = threading.Event()
@@ -270,7 +270,7 @@ if __name__ == "__main__":
 
     # Register the 'q' hotkey
     keyboard.add_hotkey('q', on_q_press)
-    
+
     num_channels_to_monitor = 0
     connected_instrument = None
     datafile_name = None # Initialize datafile_name to None
@@ -290,6 +290,7 @@ if __name__ == "__main__":
         print("Created file for data as ", datafile_name)
         
         count = 1
+        print("Press 'q' to stop the program at any time.")
         # Main loop
         while not stop_program_event.is_set():
             # Wait for the minimum acquisition interval to pass before arming
