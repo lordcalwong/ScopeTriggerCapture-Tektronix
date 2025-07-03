@@ -24,8 +24,8 @@ from openpyxl.drawing.text import Paragraph, CharacterProperties, Font
 from openpyxl.styles import Font as ExcelFont
 
 # Configure IP '192.168.1.53', '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176'
-DEFAULT_IP_ADDRESS = '192.168.1.53'   # CHANGE FOR YOUR PARTICULAR SCOPE!
-SAVE_PATH = r"C:\Users\calve\Desktop"  #C:\Users\calve\Desktop or C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop
+DEFAULT_IP_ADDRESS = '10.101.100.151'   # CHANGE FOR YOUR PARTICULAR SCOPE!
+SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop"  #C:\Users\calve\Desktop or C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop
 MIN_ACQUISITION_INTERVAL = 5   # sampling rate
 MAX_VRMS = 300
 
@@ -124,7 +124,7 @@ def sample_period(default_sample_time: str = MIN_ACQUISITION_INTERVAL):
     """
     while True:
         try:
-            sample_period = input("Enter time between samples in seconds (1-300) or 'd' for default ({MIN_ACQUISITION_INTERVAL} sec) : ").strip()
+            sample_period = input(f"Enter time between samples in seconds (1-300) or 'd' for default ({default_sample_time}) : ").strip()
             if sample_period.lower() == 'd':
                 return default_sample_time
             else:
@@ -147,8 +147,9 @@ def setup_scope(scope_device, num_channels):
         scope_device.write(f"SELect:CH{i} ON")
         scope_device.write(f"CH{i}:SCALe 10")
         scope_device.write(f"CH{i}:POSition -4")
-        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1; TYPE RMS")   # Need STATE 1 for DPO 
-
+        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")   # Need separate STATE 1 command for DPO 
+        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")  # Need separate TYPE for MSO 
+ 
     # Wait for scope to finish setting up
     scope_device.query("*OPC?")
     print("Scope setup complete.")
