@@ -8,6 +8,7 @@
 # 
 # Program configures all measurements on scope as RMS readings (~10V/div, and
 # ~trigger level of 10V or ~18W/ch (9.8V) ON and 1V/ch OFF).
+# Currently, the maximum voltage is set to 50Vp or about 300W/ch.
 # Uses pyvisa for generic scope SCPI communications for both DPO4k and MSO5k
 # series scopes.
 #
@@ -29,7 +30,11 @@ from openpyxl.chart.text import RichText
 from openpyxl.drawing.text import Paragraph, CharacterProperties, Font
 from openpyxl.styles import Font as ExcelFont
 
-# Find desktop one level down from home (~/* /Desktop) and set up as optional save path
+DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
+MIN_ACQUISITION_INTERVAL = 5   # default sampling rate
+MAX_VRMS = 50
+
+# Find user esktop one level down from home (~/* /Desktop) and set up as optional save path
 from glob import glob
 DESKTOP = glob(os.path.expanduser("~\\*\\Desktop"))
 # If not found, revert to the standard location (~/Desktop)
@@ -37,13 +42,6 @@ if len(DESKTOP) == 0:
     DESKTOP = os.path.expanduser("~\\Desktop")
 else:
     DESKTOP = DESKTOP[0] # glob returns a list, take the first result
-#desktop = r"C:\Users\calve\Desktop"  r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop"
-
-# Configure IP '192.168.1.53', '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176'
-DEFAULT_IP_ADDRESS = '192.168.1.53'   # CHANGE FOR YOUR PARTICULAR SCOPE!
-
-MIN_ACQUISITION_INTERVAL = 5   # sampling rate
-MAX_VRMS = 300
 
 # Global flag to signal the main loop and threads to stop
 stop_program_event = threading.Event()
@@ -156,12 +154,12 @@ def setup_scope(scope_device, num_channels):
     Configures channels for the specified number of channels.
     Minimally tries to set scale and position.
     """
-    print("Setting up oscilloscope...", end='')
+    print("Ok. Setting up oscilloscope...", end='')
     
     for i in range(1, num_channels + 1):
         scope_device.write(f"SELect:CH{i} ON")
         scope_device.write(f"CH{i}:SCALe 10")
-        scope_device.write(f"CH{i}:POSition -4")
+        scope_device.write(f"CH{i}:POSition 0")
         scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")   # Need separate STATE 1 command for DPO 
         scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")  # Need separate TYPE for MSO 
  
@@ -250,10 +248,40 @@ def write_to_excel_with_chart(datafile_name: str, save_directory: str, num_chann
             header = next(reader)
             ws.append(header)
 
-            # Write data rows
+            # Write data rows and convert to numbers, then format cells
+            row_count = 0 # To track actual row in Excel, starting from 1 for headers
             for row in reader:
-                ws.append(row)
-        print("Data successfully written to Excel worksheet.")
+                row_count += 1 # Increment for data rows
+                processed_row = []
+                for i, value in enumerate(row):
+                    if i == 0:  # 'Count' column
+                        try:
+                            num_value = int(value)
+                            processed_row.append(num_value)
+                            # Set number format for 'Count' column (optional, usually general is fine)
+                            ws.cell(row=row_count, column=i+1).number_format = 'General'
+                        except ValueError:
+                            processed_row.append(value)
+                    elif i == 1:  # 'Time' column (X-axis data)
+                        try:
+                            num_value = float(value)
+                            processed_row.append(num_value)
+                            # Explicitly set number format for Time column
+                            ws.cell(row=row_count, column=i+1).number_format = '0.000' # Three decimal places
+                        except ValueError:
+                            processed_row.append(value)
+                    else:  # Vrms channels (Y-axis data)
+                        try:
+                            num_value = float(value)
+                            processed_row.append(num_value)
+                            # Explicitly set number format for Vrms columns
+                            ws.cell(row=row_count, column=i+1).number_format = '0.000' # Three decimal places
+                        except ValueError:
+                            processed_row.append(None) # Append None for invalid Vrms values
+
+                ws.append(processed_row) # Append the processed row after converting values
+        print("Data successfully written to Excel worksheet and converted to numbers.")
+
 
         # --- Charting Section ---
         chart = ScatterChart()
@@ -313,7 +341,11 @@ if __name__ == "__main__":
         num_channels_to_monitor = get_num_channels()
 
         # Set up channels based on the user input
-        setup_scope(connected_instrument, num_channels_to_monitor)
+        setup_needed = input("If answering no, I will attempt to setup contiguous channels (CH1 throug X) and measurements.  Leave scope alone (y/n)? :").strip()
+        if setup_needed.lower() == 'y':
+            print("Skipping scope setup. Ensure channels are configured correctly before starting data acquisition.")
+        else:
+            setup_scope(connected_instrument, num_channels_to_monitor)            
 
         # Create a data file for logging
         starting_date_and_time = datetime.datetime.now()
