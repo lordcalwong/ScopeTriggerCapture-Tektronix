@@ -1,14 +1,19 @@
 # Power Monitoring- Synchronous
 #
 # Continuous monitor Amplifier Output channels and/or Line Inputs with
-# synchronous logging with input from user (seconds) or default of 5 seconds.
-# Configure all measurements on scope as RMS readings (~10V/div and 
-# ~trigger level of 10V) in autorun mode.
-# Trigger level is 18W/ch (9.8V) ON and 1V/ch OFF.
-# Saves data to csv file and then makes a MS Excel file with chart.
-# Uses pyvisa for generic scope SCPI communications.
+# synchronous logging. Trigger mode should be in autorun.
 #
-# Author: C. Wong 20250701
+# User inputs IP address, sample time in seconds with default of 5 seconds,
+# and number of channels to monitor (1-8).
+# 
+# Program configures all measurements on scope as RMS readings (~10V/div, and
+# ~trigger level of 10V or ~18W/ch (9.8V) ON and 1V/ch OFF).
+# Uses pyvisa for generic scope SCPI communications for both DPO4k and MSO5k
+# series scopes.
+#
+# Saves data to csv file and then makes a MS Excel file and plots a chart.
+#
+# Author: C. Wong 20250702
 
 import time
 import datetime
@@ -24,8 +29,8 @@ from openpyxl.drawing.text import Paragraph, CharacterProperties, Font
 from openpyxl.styles import Font as ExcelFont
 
 # Configure IP '192.168.1.53', '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176'
-DEFAULT_IP_ADDRESS = '10.101.100.151'   # CHANGE FOR YOUR PARTICULAR SCOPE!
-SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop"  #C:\Users\calve\Desktop or C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop
+DEFAULT_IP_ADDRESS = '192.168.1.53'   # CHANGE FOR YOUR PARTICULAR SCOPE!
+SAVE_PATH = r"C:\Users\calve\Desktop"  #C:\Users\calve\Desktop or C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop
 MIN_ACQUISITION_INTERVAL = 5   # sampling rate
 MAX_VRMS = 300
 
