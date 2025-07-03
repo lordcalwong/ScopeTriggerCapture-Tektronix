@@ -22,15 +22,26 @@ import keyboard
 import pyvisa
 import threading
 import csv
+
 from openpyxl import Workbook
 from openpyxl.chart import ScatterChart, Reference, Series
 from openpyxl.chart.text import RichText
 from openpyxl.drawing.text import Paragraph, CharacterProperties, Font
 from openpyxl.styles import Font as ExcelFont
 
+# Find desktop one level down from home (~/* /Desktop) and set up as optional save path
+from glob import glob
+DESKTOP = glob(os.path.expanduser("~\\*\\Desktop"))
+# If not found, revert to the standard location (~/Desktop)
+if len(DESKTOP) == 0:
+    DESKTOP = os.path.expanduser("~\\Desktop")
+else:
+    DESKTOP = DESKTOP[0] # glob returns a list, take the first result
+#desktop = r"C:\Users\calve\Desktop"  r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop"
+
 # Configure IP '192.168.1.53', '10.101.100.151', '10.101.100.236', '10.101.100.254', '10.101.100.176'
 DEFAULT_IP_ADDRESS = '192.168.1.53'   # CHANGE FOR YOUR PARTICULAR SCOPE!
-SAVE_PATH = r"C:\Users\calve\Desktop"  #C:\Users\calve\Desktop or C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop
+
 MIN_ACQUISITION_INTERVAL = 5   # sampling rate
 MAX_VRMS = 300
 
@@ -76,7 +87,6 @@ def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: 
         ip_address_input = input(
             f"Enter the instrument's IP address or 'd' for default ({default_ip}): "
         ).strip()
-
         if ip_address_input.lower() == 'd':
             visa_address = default_ip
         else:
@@ -159,22 +169,37 @@ def setup_scope(scope_device, num_channels):
     scope_device.query("*OPC?")
     print("Scope setup complete.")
 
-def make_datafile(num_channels, timestamp):
+def make_datafile(num_channels, timestamp, desktoppath: str = DESKTOP):
     """Generates a data file for the data based on start date and time.
-    Includes headers for each monitored channel.
+    Includes headers for each monitored channel. Asks user for directory
+    or defaults to desktop.
+    Returns tuple for user_path and data_log_file_name
     """
-    data_log_file_name = timestamp.strftime("%Y%m%d_%H%M%S.txt")
-    full_data_path = os.path.join(SAVE_PATH, data_log_file_name)
-    if not os.path.exists(full_data_path):
-        print(f"Creating new data file: {full_data_path}")
-        with open(full_data_path, "w") as datafile:
-            header = "Count, Time"
-            for i in range(1, num_channels + 1):
-                header += f", Vrms_CH{i}"
-            datafile.write(header + "\n")
-    else:
-        print(f"Appending to existing data file: {full_data_path}")
-    return data_log_file_name
+    while True:
+        try:
+            user_path_input = input(f"Enter path for data or 'd' for default ({desktoppath}): ").strip()
+            if user_path_input.lower() == 'd':
+                user_path = desktoppath
+            else:
+                user_path = user_path_input
+
+            data_log_file_name = timestamp.strftime("%Y%m%d_%H%M%S.txt")
+            full_data_path = os.path.join(user_path, data_log_file_name)
+
+            # Check if data file already exists
+            if not os.path.exists(full_data_path):
+                print(f"Creating new data file: {full_data_path}")
+                with open(full_data_path, "w") as datafile:
+                    header = "Count, Time"
+                    for i in range(1, num_channels + 1):
+                        header += f", Vrms_CH{i}"
+                    datafile.write(header + "\n")
+            else:
+                print(f"File exist. We will be appending to existing file: {full_data_path}")
+            return user_path, data_log_file_name
+
+        except ValueError:
+            print("Invalid path. Please enter a valid path.")
 
 def add_sample_to_file(save_directory, data_file_name, counter, time_in_seconds, v_rms_values):
     """
@@ -292,7 +317,10 @@ if __name__ == "__main__":
 
         # Create a data file for logging
         starting_date_and_time = datetime.datetime.now()
-        datafile_name = make_datafile(num_channels_to_monitor, starting_date_and_time)
+        paths = make_datafile(num_channels_to_monitor, starting_date_and_time, DESKTOP)
+        user_path = paths[0]
+        datafile_name = paths[1]
+        full_data_path = os.path.join(user_path, datafile_name)
         print("Created file for data as ", datafile_name)
         
         count = 1
@@ -327,7 +355,7 @@ if __name__ == "__main__":
                     print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
                     v_rms_readings.append(float('NAN'))
 
-            add_sample_to_file(SAVE_PATH, datafile_name, count, dt_in_seconds, v_rms_readings)
+            add_sample_to_file(user_path, datafile_name, count, dt_in_seconds, v_rms_readings)
             
             # Print the current sample data
             print_output = f"Sample {count:4d},   Time: {dt_in_seconds:9.3f} sec"
@@ -357,4 +385,4 @@ if __name__ == "__main__":
         
         # After data acquisition stops, write to Excel if a datafile was created
         if datafile_name and num_channels_to_monitor > 0:
-            write_to_excel_with_chart(datafile_name, SAVE_PATH, num_channels_to_monitor)
+            write_to_excel_with_chart(datafile_name, user_path, num_channels_to_monitor)
