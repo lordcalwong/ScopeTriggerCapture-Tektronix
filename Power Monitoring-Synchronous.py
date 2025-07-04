@@ -6,15 +6,17 @@
 # User inputs IP address, sample time in seconds with default of 5 seconds,
 # and number of channels to monitor (1-8).
 # 
-# Program configures all measurements on scope as RMS readings (~10V/div, and
-# ~trigger level of 10V or ~18W/ch (9.8V) ON and 1V/ch OFF).
+# User has option to set up scope or allow continous channels to be configured
+# for RMS measurements.
+#
 # Currently, the maximum voltage is set to 50Vp or about 300W/ch.
-# Uses pyvisa for generic scope SCPI communications for both DPO4k and MSO5k
+# Uses pyvisa for generic scope SCPI communications for both DPO4k and MSO58
 # series scopes.
 #
-# Saves data to csv file and then makes a MS Excel file and plots a chart.
+# Saves data to csv file, closes file, and imports csv into MS Excel file 
+# and plots a chart.
 #
-# Author: C. Wong 20250702
+# Author: C. Wong 20250703
 
 import time
 import datetime
