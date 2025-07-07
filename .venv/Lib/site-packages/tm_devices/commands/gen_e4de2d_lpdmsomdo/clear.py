@@ -18,14 +18,14 @@ from typing import Optional, TYPE_CHECKING
 from ..helpers import SCPICmdWriteNoArguments
 
 if TYPE_CHECKING:
-    from tm_devices.drivers.pi.pi_device import PIDevice
+    from tm_devices.driver_mixins.device_control.pi_control import PIControl
 
 
 class Clear(SCPICmdWriteNoArguments):
     """The ``CLEAR`` command.
 
     Description:
-        - This command  clears acquisitions, measurements, and waveforms.
+        - This command clears acquisitions, measurements, and waveforms.
 
     Usage:
         - Using the ``.write()`` method will send the ``CLEAR`` command.
@@ -36,5 +36,5 @@ class Clear(SCPICmdWriteNoArguments):
         ```
     """
 
-    def __init__(self, device: Optional["PIDevice"] = None, cmd_syntax: str = "CLEAR") -> None:
+    def __init__(self, device: Optional["PIControl"] = None, cmd_syntax: str = "CLEAR") -> None:
         super().__init__(device, cmd_syntax)

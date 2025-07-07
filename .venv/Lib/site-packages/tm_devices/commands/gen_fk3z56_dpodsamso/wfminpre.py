@@ -51,7 +51,7 @@ from typing import Optional, TYPE_CHECKING
 from ..helpers import SCPICmdRead, SCPICmdWrite
 
 if TYPE_CHECKING:
-    from tm_devices.drivers.pi.pi_device import PIDevice
+    from tm_devices.driver_mixins.device_control.pi_control import PIControl
 
 
 class WfminpreYzero(SCPICmdWrite, SCPICmdRead):
@@ -80,7 +80,7 @@ class WfminpreYzero(SCPICmdWrite, SCPICmdRead):
 
     Info:
         - ``<NR3>`` is a floating point number that specifies the offset in in units specified by
-          the ``WFMInpre:YUNitcommand`` (YUNits).
+          the ``WFMInpre:YUNit`` command (YUNits).
     """
 
 
@@ -555,7 +555,7 @@ class Wfminpre(SCPICmdRead):
         - ``.yzero``: The ``WFMInpre:YZEro`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"] = None, cmd_syntax: str = "WFMInpre") -> None:
+    def __init__(self, device: Optional["PIControl"] = None, cmd_syntax: str = "WFMInpre") -> None:
         super().__init__(device, cmd_syntax)
         self._bit_nr = WfminpreBitNr(device, f"{self._cmd_syntax}:BIT_Nr")
         self._bn_fmt = WfminpreBnFmt(device, f"{self._cmd_syntax}:BN_Fmt")
@@ -1051,6 +1051,6 @@ class Wfminpre(SCPICmdRead):
 
         Info:
             - ``<NR3>`` is a floating point number that specifies the offset in in units specified
-              by the ``WFMInpre:YUNitcommand`` (YUNits).
+              by the ``WFMInpre:YUNit`` command (YUNits).
         """
         return self._yzero

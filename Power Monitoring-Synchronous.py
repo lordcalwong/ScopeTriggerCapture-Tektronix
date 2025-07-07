@@ -27,10 +27,12 @@ import threading
 import csv
 
 from openpyxl import Workbook
-from openpyxl.chart import ScatterChart, Reference, Series
-from openpyxl.chart.text import RichText
 from openpyxl.drawing.text import Paragraph, CharacterProperties, Font
 from openpyxl.styles import Font as ExcelFont
+from openpyxl.chart import ScatterChart, Reference, Series
+from openpyxl.drawing.line import LineProperties
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.drawing.colors import ColorChoice
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
 MIN_ACQUISITION_INTERVAL = 5   # default sampling rate
@@ -139,7 +141,7 @@ def sample_period(default_sample_time: str = MIN_ACQUISITION_INTERVAL):
     """
     while True:
         try:
-            sample_period = input(f"Enter time between samples in seconds (1-300) or 'd' for default ({default_sample_time}) : ").strip()
+            sample_period = input(f"Enter time between samples in seconds (1-300) or 'd' for default ({default_sample_time}): ").strip()
             if sample_period.lower() == 'd':
                 return default_sample_time
             else:
@@ -302,6 +304,20 @@ def write_to_excel_with_chart(datafile_name: str, save_directory: str, num_chann
             chart.series.append(series)
         # Add the chart to the worksheet
         ws.add_chart(chart, "E2") # Adjust cell to place the chart as needed
+        # Ensure axes are not deleted
+        chart.x_axis.delete = False
+        chart.y_axis.delete = False
+
+        # Access legend's graphical properties to add fill and outline
+        if chart.legend: # Ensure legend exists before trying to style it
+            legend_spPr = GraphicalProperties()
+            # Using preset colors directly within ColorChoice for solidFill
+            legend_spPr.solidFill = ColorChoice(prstClr='white')  # White fill
+            line_props = LineProperties()
+            line_props.solidFill = ColorChoice(prstClr='black') # Black outline
+            line_props.width = 12700 # 1 pt in EMU (English Metric Units), 12700 EMU = 1 pt
+            legend_spPr.line = line_props
+            chart.legend.spPr = legend_spPr
         # --- End Charting Section ---
 
         wb.save(full_excel_path)
@@ -343,7 +359,7 @@ if __name__ == "__main__":
         num_channels_to_monitor = get_num_channels()
 
         # Set up channels based on the user input
-        setup_needed = input("If answering no, I will attempt to setup contiguous channels (CH1 throug X) and measurements.  Leave scope alone (y/n)? :").strip()
+        setup_needed = input("If answering no, I will attempt to setup contiguous channels (CH1 throug X) and measurements.  Leave scope alone (y/n)?:").strip()
         if setup_needed.lower() == 'y':
             print("Skipping scope setup. Ensure channels are configured correctly before starting data acquisition.")
         else:

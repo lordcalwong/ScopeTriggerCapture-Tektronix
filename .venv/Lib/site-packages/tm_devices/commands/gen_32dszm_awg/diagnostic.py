@@ -23,7 +23,7 @@ from typing import Optional, TYPE_CHECKING
 from ..helpers import SCPICmdRead, SCPICmdWrite, SCPICmdWriteNoArguments
 
 if TYPE_CHECKING:
-    from tm_devices.drivers.pi.pi_device import PIDevice
+    from tm_devices.driver_mixins.device_control.pi_control import PIControl
 
 
 class DiagnosticSelect(SCPICmdWrite, SCPICmdRead):
@@ -61,7 +61,7 @@ class DiagnosticImmediate(SCPICmdWriteNoArguments, SCPICmdRead):
     Description:
         - This command executes all of the NORMal diagnostic tests. The query form of this command
           executes all of the NORMal diagnostics and returns the results in the form of numeric of
-          values of 0 for no errors or  -330 for one or more tests failed. This changes the active
+          values of 0 for no errors or -330 for one or more tests failed. This changes the active
           mode to DIAGnostic, if necessary, and returns back to the original active mode when done.
           This makes a single pass of all of the NORMal diagnostics.
 
@@ -114,7 +114,9 @@ class Diagnostic(SCPICmdRead):
         - ``.immediate``: The ``DIAGnostic:IMMediate`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"] = None, cmd_syntax: str = "DIAGnostic") -> None:
+    def __init__(
+        self, device: Optional["PIControl"] = None, cmd_syntax: str = "DIAGnostic"
+    ) -> None:
         super().__init__(device, cmd_syntax)
         self._data = DiagnosticData(device, f"{self._cmd_syntax}:DATA")
         self._select = DiagnosticSelect(device, f"{self._cmd_syntax}:SELect")
@@ -179,7 +181,7 @@ class Diagnostic(SCPICmdRead):
         Description:
             - This command executes all of the NORMal diagnostic tests. The query form of this
               command executes all of the NORMal diagnostics and returns the results in the form of
-              numeric of values of 0 for no errors or  -330 for one or more tests failed. This
+              numeric of values of 0 for no errors or -330 for one or more tests failed. This
               changes the active mode to DIAGnostic, if necessary, and returns back to the original
               active mode when done. This makes a single pass of all of the NORMal diagnostics.
 

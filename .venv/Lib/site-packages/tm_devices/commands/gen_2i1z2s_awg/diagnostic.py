@@ -45,7 +45,7 @@ from typing import Optional, TYPE_CHECKING
 from ..helpers import SCPICmdRead, SCPICmdReadWithArguments, SCPICmdWrite, SCPICmdWriteNoArguments
 
 if TYPE_CHECKING:
-    from tm_devices.drivers.pi.pi_device import PIDevice
+    from tm_devices.driver_mixins.device_control.pi_control import PIControl
 
 
 class DiagnosticUnselect(SCPICmdWrite):
@@ -112,7 +112,7 @@ class DiagnosticType(SCPICmdWrite, SCPICmdRead):
         - ``.catalog``: The ``DIAGnostic:TYPE:CATalog`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"], cmd_syntax: str) -> None:
+    def __init__(self, device: Optional["PIControl"], cmd_syntax: str) -> None:
         super().__init__(device, cmd_syntax)
         self._catalog = DiagnosticTypeCatalog(device, f"{self._cmd_syntax}:CATalog")
 
@@ -173,7 +173,7 @@ class DiagnosticStop(SCPICmdWriteNoArguments, SCPICmdRead):
         - ``.state``: The ``DIAGnostic:STOP:STATe`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"], cmd_syntax: str) -> None:
+    def __init__(self, device: Optional["PIControl"], cmd_syntax: str) -> None:
         super().__init__(device, cmd_syntax)
         self._state = DiagnosticStopState(device, f"{self._cmd_syntax}:STATe")
 
@@ -218,8 +218,8 @@ class DiagnosticSelectVerify(SCPICmdReadWithArguments):
 
     Description:
         - This command returns selection status of one specific test. A specific test requires the
-          'subsystem',  'area', and 'test'. This is context sensitive and is dependent on the type
-          as set with the command ``DIAGNOSTIC:TYPE``.
+          'subsystem', 'area', and 'test'. This is context sensitive and is dependent on the type as
+          set with the command ``DIAGNOSTIC:TYPE``.
 
     Usage:
         - Using the ``.query(argument)`` method will send the ``DIAGnostic:SELect:VERify? argument``
@@ -259,7 +259,7 @@ class DiagnosticSelect(SCPICmdWrite, SCPICmdRead):
         - ``.verify``: The ``DIAGnostic:SELect:VERify`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"], cmd_syntax: str) -> None:
+    def __init__(self, device: Optional["PIControl"], cmd_syntax: str) -> None:
         super().__init__(device, cmd_syntax)
         self._verify = DiagnosticSelectVerify(device, f"{self._cmd_syntax}:VERify")
 
@@ -269,8 +269,8 @@ class DiagnosticSelect(SCPICmdWrite, SCPICmdRead):
 
         Description:
             - This command returns selection status of one specific test. A specific test requires
-              the 'subsystem',  'area', and 'test'. This is context sensitive and is dependent on
-              the type as set with the command ``DIAGNOSTIC:TYPE``.
+              the 'subsystem', 'area', and 'test'. This is context sensitive and is dependent on the
+              type as set with the command ``DIAGNOSTIC:TYPE``.
 
         Usage:
             - Using the ``.query(argument)`` method will send the
@@ -393,7 +393,7 @@ class DiagnosticResult(SCPICmdReadWithArguments):
         - ``.time``: The ``DIAGnostic:RESult:TIME`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"], cmd_syntax: str) -> None:
+    def __init__(self, device: Optional["PIControl"], cmd_syntax: str) -> None:
         super().__init__(device, cmd_syntax)
         self._temperature = DiagnosticResultTemperature(device, f"{self._cmd_syntax}:TEMPerature")
         self._time = DiagnosticResultTime(device, f"{self._cmd_syntax}:TIME")
@@ -545,7 +545,7 @@ class DiagnosticLog(SCPICmdRead):
         - ``.failuresonly``: The ``DIAGnostic:LOG:FAILuresonly`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"], cmd_syntax: str) -> None:
+    def __init__(self, device: Optional["PIControl"], cmd_syntax: str) -> None:
         super().__init__(device, cmd_syntax)
         self._clear = DiagnosticLogClear(device, f"{self._cmd_syntax}:CLEar")
         self._failuresonly = DiagnosticLogFailuresonly(device, f"{self._cmd_syntax}:FAILuresonly")
@@ -602,7 +602,7 @@ class DiagnosticImmediate(SCPICmdWriteNoArguments, SCPICmdRead):
     Description:
         - This command executes all of the NORMal diagnostic tests. The query form of this command
           executes all of the NORMal diagnostics and returns the results in the form of numeric of
-          values of 0 for no errors or  -330 for one or more tests failed. This changes the active
+          values of 0 for no errors or -330 for one or more tests failed. This changes the active
           mode to DIAGnostic, if necessary, and returns back to the original active mode when done.
           This makes a single pass of all of the NORMal diagnostics.
 
@@ -735,7 +735,7 @@ class DiagnosticControl(SCPICmdRead):
         - ``.loop``: The ``DIAGnostic:CONTrol:LOOP`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"], cmd_syntax: str) -> None:
+    def __init__(self, device: Optional["PIControl"], cmd_syntax: str) -> None:
         super().__init__(device, cmd_syntax)
         self._count = DiagnosticControlCount(device, f"{self._cmd_syntax}:COUNt")
         self._halt = DiagnosticControlHalt(device, f"{self._cmd_syntax}:HALT")
@@ -892,7 +892,9 @@ class Diagnostic(SCPICmdRead):
         - ``.immediate``: The ``DIAGnostic:IMMediate`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"] = None, cmd_syntax: str = "DIAGnostic") -> None:
+    def __init__(
+        self, device: Optional["PIControl"] = None, cmd_syntax: str = "DIAGnostic"
+    ) -> None:
         super().__init__(device, cmd_syntax)
         self._abort = DiagnosticAbort(device, f"{self._cmd_syntax}:ABORt")
         self._catalog = DiagnosticCatalog(device, f"{self._cmd_syntax}:CATalog")
@@ -1215,7 +1217,7 @@ class Diagnostic(SCPICmdRead):
         Description:
             - This command executes all of the NORMal diagnostic tests. The query form of this
               command executes all of the NORMal diagnostics and returns the results in the form of
-              numeric of values of 0 for no errors or  -330 for one or more tests failed. This
+              numeric of values of 0 for no errors or -330 for one or more tests failed. This
               changes the active mode to DIAGnostic, if necessary, and returns back to the original
               active mode when done. This makes a single pass of all of the NORMal diagnostics.
 

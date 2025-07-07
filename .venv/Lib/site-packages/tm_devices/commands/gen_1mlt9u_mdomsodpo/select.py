@@ -57,7 +57,7 @@ from ..helpers import (
 )
 
 if TYPE_CHECKING:
-    from tm_devices.drivers.pi.pi_device import PIDevice
+    from tm_devices.driver_mixins.device_control.pi_control import PIControl
 
 
 class SelectRfPhase(SCPICmdWrite, SCPICmdRead):
@@ -387,13 +387,12 @@ class SelectControl(SCPICmdWrite, SCPICmdRead):
 
     Info:
         - ``CH<x>`` specifies a channel waveform as the waveform affected by the front-panel
-          controls. x has a minimum of 1 and a maximum of 4.
+          controls.
         - ``MATH`` specifies the math waveform as the waveform that is affected by the front-panel
           controls.
         - ``BUS<x>`` specifies a bus waveform as the waveform affected by the front-panel controls.
-          x has a minimum of 1 and a maximum of 4.
         - ``D<x>`` specifies a digital waveform as the waveform affected by the front-panel
-          controls. (Requires option 3-MSO.) x has a minimum of 0 and a maximum of 15.
+          controls. (Requires option 3-MSO.).
         - ``RF_NORMal`` specify an RF trace as the waveform affected by the front-panel controls.
         - ``RF_AVErage`` specify an RF trace as the waveform affected by the front-panel controls.
         - ``RF_MAXHold`` specify an RF trace as the waveform affected by the front-panel controls.
@@ -519,7 +518,7 @@ class Select(SCPICmdRead):
         - ``.math1``: The ``SELect:MATH1`` command.
     """
 
-    def __init__(self, device: Optional["PIDevice"] = None, cmd_syntax: str = "SELect") -> None:
+    def __init__(self, device: Optional["PIControl"] = None, cmd_syntax: str = "SELect") -> None:
         super().__init__(device, cmd_syntax)
         self._ch: Dict[int, SelectChannel] = DefaultDictPassKeyToFactory(
             lambda x: SelectChannel(device, f"{self._cmd_syntax}:CH{x}")
@@ -602,13 +601,13 @@ class Select(SCPICmdRead):
 
         Info:
             - ``CH<x>`` specifies a channel waveform as the waveform affected by the front-panel
-              controls. x has a minimum of 1 and a maximum of 4.
+              controls.
             - ``MATH`` specifies the math waveform as the waveform that is affected by the
               front-panel controls.
             - ``BUS<x>`` specifies a bus waveform as the waveform affected by the front-panel
-              controls. x has a minimum of 1 and a maximum of 4.
+              controls.
             - ``D<x>`` specifies a digital waveform as the waveform affected by the front-panel
-              controls. (Requires option 3-MSO.) x has a minimum of 0 and a maximum of 15.
+              controls. (Requires option 3-MSO.).
             - ``RF_NORMal`` specify an RF trace as the waveform affected by the front-panel
               controls.
             - ``RF_AVErage`` specify an RF trace as the waveform affected by the front-panel
