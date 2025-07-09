@@ -72,6 +72,13 @@ def on_q_press():
     print("\n'q' pressed. Signaling program to stop.")
     stop_program_event.set()
 
+def on_esc_press():
+    """
+    Callback function when 'Esc' is pressed.
+    """
+    print("You pressed Esc!")
+    stop_program_event.set()
+
 def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: str = DEFAULT_IP_ADDRESS):
     """
     Prompts the user for an IP address and attempts to establish a connection
@@ -347,6 +354,7 @@ if __name__ == "__main__":
 
     # Register the 'q' hotkey
     keyboard.add_hotkey('q', on_q_press)
+    keyboard.add_hotkey('esc', on_esc_press)
 
     num_channels_to_monitor = 0
     connected_instrument = None
@@ -374,7 +382,7 @@ if __name__ == "__main__":
         print("Created file for data as ", datafile_name)
         
         count = 1
-        print("Press 'q' to stop the program at any time.")
+        print("Press 'q' or 'Crtl-C' to stop the program at any time.")
         # Main loop
         while not stop_program_event.is_set():
             # Wait for the minimum acquisition interval to pass before arming

@@ -3,7 +3,7 @@
 
 For additional information and VISA attributes see pyvisa.constants
 
-:copyright: 2014-2020 by PyVISA-py Authors, see AUTHORS for more details.
+:copyright: 2014-2024 by PyVISA-py Authors, see AUTHORS for more details.
 :license: MIT, see LICENSE for more details.
 """
 
@@ -27,4 +27,5 @@ class AttrVI_ATTR_TCPIP_KEEPALIVE(former_keepalive):
     resources = [
         (constants.InterfaceType.tcpip, "SOCKET"),
         (constants.InterfaceType.tcpip, "INSTR"),
+        (constants.InterfaceType.vicp, "INSTR"),
     ]
