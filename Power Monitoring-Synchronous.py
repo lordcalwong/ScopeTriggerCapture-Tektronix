@@ -1,7 +1,8 @@
 # Power Monitoring- Synchronous
 #
 # Continuous monitor Amplifier Output channels and/or Line Inputs with
-# synchronous logging. Trigger mode should be in autorun.
+# user set synchronous logging. Trigger level must be user set and 
+# mode should be in autorun.
 #
 # User inputs IP address, sample time in seconds with default of 5 seconds,
 # and number of channels to monitor (1-8).
@@ -13,18 +14,18 @@
 # Uses pyvisa for generic scope SCPI communications for both DPO4k and MSO58
 # series scopes.
 #
-# Saves data to csv file, closes file, and imports csv into MS Excel file 
-# and plots a chart.
+# Saves data to csv file on desktop, closes file, and imports csv into MS 
+# Excel file and plots a chart.
 #
-# Author: C. Wong 20250703
+# Author: C. Wong 202507039
 
 import time
 import datetime
 import os
-import keyboard
 import pyvisa
 import threading
 import csv
+import keyboard
 
 from openpyxl import Workbook
 from openpyxl.drawing.text import Paragraph, CharacterProperties, Font
@@ -337,6 +338,9 @@ def write_to_excel_with_chart(datafile_name: str, save_directory: str, num_chann
 
 # --- MAIN ---
 if __name__ == "__main__":
+    print("Generic Tektronix Power Out Monitoring Script\n")
+    print("Takes measurement scope data and logs to csv file on desktop and makes an Excel chart")
+
     # Initialize the Resource Manager
     rm = pyvisa.ResourceManager('@py')
     print("Resources found " , rm.list_resources())
@@ -367,8 +371,8 @@ if __name__ == "__main__":
         num_channels_to_monitor = get_num_channels()
 
         # Set up channels based on the user input
-        setup_needed = input("If answering no, I will attempt to setup contiguous channels (CH1 throug X) and measurements.  Leave scope alone (y/n)?:").strip()
-        if setup_needed.lower() == 'y':
+        setup_needed = input("(L)eave alone or (S)etup scope? :").strip()
+        if setup_needed.lower() == 'l':
             print("Skipping scope setup. Ensure channels are configured correctly before starting data acquisition.")
         else:
             setup_scope(connected_instrument, num_channels_to_monitor)            

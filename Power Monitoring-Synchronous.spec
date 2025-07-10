@@ -1,21 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+
 a = Analysis(
     ['Power Monitoring-Synchronous.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[
-    'pyvisa_py',
-    'openpyxl'],
-    hookspath=['hooks'],
+    hiddenimports=['pyvisa_py', 'zeroconf', 'keyboard'],
+    hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
-    optimize=0
+    optimize=0,
 )
-
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -25,7 +23,7 @@ exe = EXE(
     a.datas,
     [],
     name='Power Monitoring-Synchronous',
-    debug=True,
+    debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
