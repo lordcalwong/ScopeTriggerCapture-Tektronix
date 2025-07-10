@@ -1,38 +1,25 @@
 # Power Monitoring- Synchronous
 #
 # Continuous monitor Amplifier Output channels and/or Line Inputs with
-# synchronous logging. Trigger mode should be in autorun.
+# triggered time logging.
 #
-# User inputs IP address, sample time in seconds with default of 5 seconds,
-# and number of channels to monitor (1-8).
+# User inputs IP address and number of channels to monitor (1-8), and
+# the option to set up scope or allow contiguous channels to be configured
+# for RMS measurements.  User sets desired ON or OFF threshold.
 #
-# User has option to set up scope or allow continous channels to be configured
-# for RMS measurements.
+# Saves data to csv file to user path or defaults to the desktop.
 #
-# Currently, the maximum voltage is set to 50Vp or about 300W/ch.
-# Uses pyvisa for generic scope SCPI communications for both DPO4k and MSO58
-# series scopes.
-#
-# Saves data to csv file, closes file, and imports csv into MS Excel file
-# and plots a chart.
-#
-# Author: C. Wong 20250703
+# Author: C. Wong 20250710
 
 import time
 import datetime
 import os
-import keyboard
 import pyvisa
 import threading
 import csv
+import keyboard
 
 from openpyxl import Workbook
-from openpyxl.drawing.text import Paragraph, CharacterProperties, Font
-from openpyxl.styles import Font as ExcelFont
-from openpyxl.chart import ScatterChart, Reference, Series
-from openpyxl.drawing.line import LineProperties
-from openpyxl.chart.shapes import GraphicalProperties
-from openpyxl.drawing.colors import ColorChoice
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
 MAX_VRMS = 50
@@ -53,9 +40,6 @@ else:
 
 # Global flag to signal the main loop and threads to stop
 stop_program_event = threading.Event()
-
-# --- FUNCTION DEFINITION ---
-# REMOVED: timer_thread_func - No longer needed for threshold-based sampling
 
 def on_q_press():
     """
@@ -134,8 +118,6 @@ def get_num_channels():
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-# REMOVED: sample_period - No longer applies
-
 def setup_scope(scope_device, num_channels):
     """
     Configures channels for the specified number of channels.
@@ -203,10 +185,9 @@ def apply_vrms_bounds(v_rms):
     """
     return max(min(v_rms, MAX_VRMS), 0)
 
-def write_to_excel_with_chart(datafile_name: str, save_directory: str): # num_channels removed
+def write_to_excel(datafile_name: str, save_directory: str): # num_channels removed
     """
-    Reads data from the specified CSV file, writes it to an Excel worksheet,
-    and creates a scatter chart for durations.
+    Reads data from the specified CSV file, writes it to an Excel worksheet
 
     Args:
         datafile_name: The name of the CSV data file.
@@ -254,113 +235,8 @@ def write_to_excel_with_chart(datafile_name: str, save_directory: str): # num_ch
                         except ValueError:
                             processed_row.append(None) # Append None for invalid duration values
                 ws.append(processed_row)
-        print("Data successfully written to Excel worksheet.")
-
-
-        # --- Charting Section ---
-        chart = ScatterChart()
-        chart.title = "State Durations Over Time"
-        chart.style = 10
-        chart.x_axis.title = "Event Number" # Using event number for X-axis
-        chart.y_axis.title = "Duration (seconds)"
-        max_row = ws.max_row
-
-        # Add ON durations
-        x_values_on = Reference(ws, min_col=1, min_row=2, max_row=max_row, max_col=1) # Event_Count
-        y_values_on = Reference(ws, min_col=5, min_row=2, max_row=max_row, max_col=5) # Duration_Seconds
-        # Filter for "ON" state
-        series_on = Series(y_values_on, x_values_on, title="ON Duration")
-        # Customizing series to only show 'ON' data is tricky with direct openpyxl references
-        # A more advanced approach would involve creating separate filtered lists in Python
-        # For simplicity, this chart will plot all durations, and the user can filter in Excel.
-        # Or, we can iterate and add series conditionally based on the 'State' column.
-
-        # Let's create two series, one for ON and one for OFF, based on the state column.
-        # This requires reading the data into lists first.
-        on_durations_for_chart = []
-        off_durations_for_chart = []
-        event_counts_on = []
-        event_counts_off = []
-
-        # Read data again to filter for chart series
-        with open(full_csv_path, 'r') as f:
-            reader = csv.reader(f)
-            next(reader) # Skip header
-            for row in reader:
-                try:
-                    event_count = int(row[0])
-                    state = row[3]
-                    duration = float(row[4])
-                    if state == "ON":
-                        event_counts_on.append(event_count)
-                        on_durations_for_chart.append(duration)
-                    elif state == "OFF":
-                        event_counts_off.append(event_count)
-                        off_durations_for_chart.append(duration)
-                except (ValueError, IndexError):
-                    continue # Skip malformed rows
-
-        # Create new sheets or ranges for chart data if filtering heavily
-        # For minimal change, let's just make one series and rely on Excel for filtering or manual separation.
-        # A simple scatter of all durations is the easiest given the 'minimal change' constraint.
-
-        # Simpler approach: Just plot all durations, with different colors for ON/OFF
-        # This still requires iterating over the data
-        chart_data_rows = []
-        # Re-read data from the Excel sheet, skipping header (row 1)
-        for r_idx in range(2, max_row + 1):
-            row_data = []
-            for c_idx in range(1, ws.max_column + 1):
-                row_data.append(ws.cell(row=r_idx, column=c_idx).value)
-            chart_data_rows.append(row_data)
-
-        on_events_idx = []
-        on_durations = []
-        off_events_idx = []
-        off_durations = []
-
-        for r_idx, row in enumerate(chart_data_rows):
-            event_count = row[0]
-            state = row[3]
-            duration = row[4]
-            if state == "ON" and duration is not None:
-                on_events_idx.append(event_count)
-                on_durations.append(duration)
-            elif state == "OFF" and duration is not None:
-                off_events_idx.append(event_count)
-                off_durations.append(duration)
-
-        # Write filtered data to temporary columns or directly use in chart with inline data if possible
-        # This is beyond "minimal changes" to the Excel charting.
-        # The easiest is to just plot a single series of all durations, and the 'State' column will be available in the table.
-
-        # Reverting to the simplest chart: plot all durations against event number.
-        # This plots every row's duration. The state info is in the table.
-        x_values = Reference(ws, min_col=1, min_row=2, max_row=max_row) # Event_Count
-        y_values = Reference(ws, min_col=5, min_row=2, max_row=max_row) # Duration_Seconds
-        series = Series(y_values, x_values, title="All Durations")
-        chart.series.append(series)
-
-        # Add the chart to the worksheet
-        ws.add_chart(chart, "F2") # Adjust cell to place the chart as needed
-        # Ensure axes are not deleted
-        chart.x_axis.delete = False
-        chart.y_axis.delete = False
-
-        # Access legend's graphical properties to add fill and outline
-        if chart.legend: # Ensure legend exists before trying to style it
-            legend_spPr = GraphicalProperties()
-            # Using preset colors directly within ColorChoice for solidFill
-            legend_spPr.solidFill = ColorChoice(prstClr='white')  # White fill
-            line_props = LineProperties()
-            line_props.solidFill = ColorChoice(prstClr='black') # Black outline
-            line_props.width = 12700 # 1 pt in EMU (English Metric Units), 12700 EMU = 1 pt
-            legend_spPr.line = line_props
-            chart.legend.spPr = legend_spPr
-        # --- End Charting Section ---
-
         wb.save(full_excel_path)
-        print(f"Excel data and chart saved successfully to: {full_excel_path}")
+        print(f"Excel data saved successfully to: {full_excel_path}")
 
     except FileNotFoundError:
         print(f"Error: CSV data file not found at {full_csv_path}. Cannot create Excel file.")
@@ -418,71 +294,76 @@ if __name__ == "__main__":
 
         # Main loop
         while not stop_program_event.is_set():
-            time.sleep(0.1) # Small delay to prevent busy-waiting and allow for keyboard input
+            time.sleep(0.1) # Small delay for keyboard input before checking if scope triggered
+            Status = scope.query('ACQuire:STATE?')
 
-            v_rms_readings = []
-            for i in range(1, num_channels_to_monitor + 1):
-                try:
-                    v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
-                    # Apply bounds using the new routine call
-                    v_rms = apply_vrms_bounds(v_rms)
-                    v_rms_readings.append(v_rms)
-                except pyvisa.errors.VisaIOError as e:
-                    print(f"Error reading RMS for Channel {i}: {e}. Skipping this channel for this sample.")
-                    v_rms_readings.append(float('NAN')) # Append NaN if reading fails
-                except ValueError:
-                    print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
-                    v_rms_readings.append(float('NAN'))
+            if Status == '0' :  
+                # Scope triggered; turn of trigger by setting super high
+                scope.write("TRIGger:A:LEVel:CH1 50")
+                print("Scope triggered.")
 
-            # Check if any readings are NaN, if so, we can't determine state reliably
-            if any(v == float('NAN') for v in v_rms_readings):
-                print("Warning: Skipping state evaluation due to invalid Vrms readings.")
-                continue
+                v_rms_readings = []
+                for i in range(1, num_channels_to_monitor + 1):
+                    try:
+                        v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
+                        # Apply bounds using the new routine call
+                        v_rms = apply_vrms_bounds(v_rms)
+                        v_rms_readings.append(v_rms)
+                    except pyvisa.errors.VisaIOError as e:
+                        print(f"Error reading RMS for Channel {i}: {e}. Skipping this channel for this sample.")
+                        v_rms_readings.append(float('NAN')) # Append NaN if reading fails
+                    except ValueError:
+                        print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
+                        v_rms_readings.append(float('NAN'))
 
-            all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings)
-            all_channels_off = all(v <= OFF_THRESHOLD for v in v_rms_readings)
-            current_time = datetime.datetime.now()
+                # Check if any readings are NaN, if so, we can't determine state reliably
+                if any(v == float('NAN') for v in v_rms_readings):
+                    print("Warning: Skipping state evaluation due to invalid Vrms readings.")
+                    continue
 
-            new_state = current_state # Assume state doesn't change unless conditions met
+                all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings)
+                all_channels_off = all(v <= OFF_THRESHOLD for v in v_rms_readings)
+                current_time = datetime.datetime.now()
+                new_state = current_state # Assume state doesn't change unless conditions met
 
-            if current_state == "UNKNOWN":
-                if all_channels_on:
-                    new_state = "ON"
-                elif all_channels_off:
-                    new_state = "OFF"
-                # If still UNKNOWN (e.g., in transition), just keep polling
-                if new_state != "UNKNOWN":
-                    current_state = new_state
-                    last_state_change_time = current_time
-                    print(f"Initial state determined: {current_state} at {current_time.strftime('%Y-%m-%d %H:%M:%S.%f')}")
+                if current_state == "UNKNOWN":
+                    if all_channels_on:
+                        new_state = "ON"
+                    elif all_channels_off:
+                        new_state = "OFF"
+                    # If still UNKNOWN (e.g., in transition), just keep polling
+                    if new_state != "UNKNOWN":
+                        current_state = new_state
+                        last_state_change_time = current_time
+                        print(f"Initial state determined: {current_state} at {current_time.strftime('%Y-%m-%d %H:%M:%S.%f')}")
 
-            elif current_state == "OFF":
-                if all_channels_on:
-                    # Transition from OFF to ON
-                    new_state = "ON"
-                    duration = (current_time - last_state_change_time).total_seconds()
-                    event_counter += 1
-                    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "OFF", duration)
-                    print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
-                    current_state = new_state
-                    last_state_change_time = current_time
+                elif current_state == "OFF":
+                    if all_channels_on:
+                        # Transition from OFF to ON
+                        new_state = "ON"
+                        duration = (current_time - last_state_change_time).total_seconds()
+                        event_counter += 1
+                        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "OFF", duration)
+                        print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
+                        current_state = new_state
+                        last_state_change_time = current_time
 
-            elif current_state == "ON":
-                if all_channels_off:
-                    # Transition from ON to OFF
-                    new_state = "OFF"
-                    duration = (current_time - last_state_change_time).total_seconds()
-                    event_counter += 1
-                    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "ON", duration)
-                    print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds.")
-                    current_state = new_state
-                    last_state_change_time = current_time
+                elif current_state == "ON":
+                    if all_channels_off:
+                        # Transition from ON to OFF
+                        new_state = "OFF"
+                        duration = (current_time - last_state_change_time).total_seconds()
+                        event_counter += 1
+                        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "ON", duration)
+                        print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds.")
+                        current_state = new_state
+                        last_state_change_time = current_time
 
-            # Print current readings for monitoring purposes
-            print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
-            for i, v_rms in enumerate(v_rms_readings):
-                print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
-            print(print_output + f" -> State: {current_state}")
+                # Print current readings for monitoring purposes
+                print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
+                for i, v_rms in enumerate(v_rms_readings):
+                    print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
+                print(print_output + f" -> State: {current_state}")
 
     except Exception as e:
         print(f"An error occurred during program execution: {e}")
@@ -507,4 +388,4 @@ if __name__ == "__main__":
 
         # After data acquisition stops, write to Excel if a datafile was created
         if datafile_name: # No longer dependent on num_channels_to_monitor > 0 for this logic
-            write_to_excel_with_chart(datafile_name, user_path)
+            write_to_excel(datafile_name, user_path)

@@ -17,7 +17,7 @@
 # Saves data to csv file on desktop, closes file, and imports csv into MS 
 # Excel file and plots a chart.
 #
-# Author: C. Wong 202507039
+# Author: C. Wong 20250709
 
 import time
 import datetime
