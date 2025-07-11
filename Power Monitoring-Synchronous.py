@@ -39,7 +39,7 @@ DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
 MIN_ACQUISITION_INTERVAL = 5   # default sampling rate
 MAX_VRMS = 50
 
-# Find user esktop one level down from home (~/* /Desktop) and set up as optional save path
+# Find user desktop one level down from home (~/* /Desktop) and set up as optional save path
 from glob import glob
 DESKTOP = glob(os.path.expanduser("~\\*\\Desktop"))
 # If not found, revert to the standard location (~/Desktop)
@@ -279,7 +279,7 @@ def write_to_excel_with_chart(datafile_name: str, save_directory: str, num_chann
                             num_value = float(value)
                             processed_row.append(num_value)
                             # Explicitly set number format for Time column
-                            ws.cell(row=row_count, column=i+1).number_format = '0.000' # Three decimal places
+                            ws.cell(row=row_count, column=i+1).number_format = '0.' # Three decimal places
                         except ValueError:
                             processed_row.append(value)
                     else:  # Vrms channels (Y-axis data)
@@ -287,7 +287,7 @@ def write_to_excel_with_chart(datafile_name: str, save_directory: str, num_chann
                             num_value = float(value)
                             processed_row.append(num_value)
                             # Explicitly set number format for Vrms columns
-                            ws.cell(row=row_count, column=i+1).number_format = '0.000' # Three decimal places
+                            ws.cell(row=row_count, column=i+1).number_format = '0.'# Three decimal places
                         except ValueError:
                             processed_row.append(None) # Append None for invalid Vrms values
 

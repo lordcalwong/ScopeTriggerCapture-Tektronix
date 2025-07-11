@@ -23,13 +23,10 @@ from openpyxl import Workbook
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
 MAX_VRMS = 50
+ON_THRESHOLD = 3.0  #default trigger levels for 'ON'
+OFF_THRESHOLD = 1.0 #default trigger levels for 'OFF'
 
-# --- NEW: Voltage Thresholds ---
-ON_THRESHOLD = 5.0  # Vrms - all channels must be above this to be considered 'ON'
-OFF_THRESHOLD = 1.0 # Vrms - all channels must be below this to be considered 'OFF'
-# -----------------------------
-
-# Find user esktop one level down from home (~/* /Desktop) and set up as optional save path
+# Find user desktop one level down from home (~/* /Desktop) and set up as optional save path
 from glob import glob
 DESKTOP = glob(os.path.expanduser("~\\*\\Desktop"))
 # If not found, revert to the standard location (~/Desktop)
@@ -130,7 +127,15 @@ def setup_scope(scope_device, num_channels):
         scope_device.write(f"CH{i}:SCALe 10")
         scope_device.write(f"CH{i}:POSition 0")
         scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")   # Need separate STATE 1 command for DPO
-        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")  # Need separate TYPE for MSO
+        scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")  # Need separate TYPE command for MSO
+    # scope_device.write("TRIGger:A:EDGE:SOUrce CH1")
+    # scope_device.write("TRIGger:A:EDGE:COUPling DC")
+    # scope_device.write("TRIGger:A:EDGE:SLOpe RISE")
+    # scope_device.write("TRIGger:A:LEVel:CH1 50")  #Set initially to high level to delay trigger
+    # scope_device.write("TRIGger:A:MODe NORMal")
+    # scope_device.write("TRIGger:A:TYPe EDGE")
+    # scope_device.write("ACQuire:STOPAfter SEQUENCE")
+    # scope_device.write("ACQuire:STATE ON")
 
     # Wait for scope to finish setting up
     scope_device.query("*OPC?")
@@ -249,9 +254,6 @@ if __name__ == "__main__":
     rm = pyvisa.ResourceManager('@py')
     print("Resources found " , rm.list_resources())
 
-    # REMOVED: sample_time = sample_period(MIN_ACQUISITION_INTERVAL)
-    # REMOVED: acquisition_allowed_event and timer_thread
-
     # Register the 'q' hotkey
     keyboard.add_hotkey('q', on_q_press)
     keyboard.add_hotkey('esc', on_esc_press)
@@ -274,8 +276,8 @@ if __name__ == "__main__":
         num_channels_to_monitor = get_num_channels()
 
         # Set up channels based on the user input
-        setup_needed = input("If answering no, I will attempt to setup contiguous channels (CH1 throug X) and measurements.  Leave scope alone (y/n)?:").strip()
-        if setup_needed.lower() == 'y':
+        setup_needed = input("(L)eave scope alone or (S)etup contiguous channels?:").strip()
+        if setup_needed.lower() == 'l':
             print("Skipping scope setup. Ensure channels are configured correctly before starting data acquisition.")
         else:
             setup_scope(connected_instrument, num_channels_to_monitor)
@@ -295,12 +297,12 @@ if __name__ == "__main__":
         # Main loop
         while not stop_program_event.is_set():
             time.sleep(0.1) # Small delay for keyboard input before checking if scope triggered
-            Status = scope.query('ACQuire:STATE?')
+            Status = connected_instrument.query('ACQuire:STATE?')
 
             if Status == '0' :  
-                # Scope triggered; turn of trigger by setting super high
-                scope.write("TRIGger:A:LEVel:CH1 50")
-                print("Scope triggered.")
+                # Scope triggered; turn off by setting super high level
+                connected_instrument.write("TRIGger:A:LEVel:CH1 50")
+                print("Status = " , Status, ". Scope triggered.")
 
                 v_rms_readings = []
                 for i in range(1, num_channels_to_monitor + 1):
@@ -365,6 +367,13 @@ if __name__ == "__main__":
                     print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
                 print(print_output + f" -> State: {current_state}")
 
+            elif Status == '1': #Status is 1. Still awaiting trigger
+                # Revise trigger level and verify triggered
+                print("Status = ", Status, ". Still waiting for trigger.")
+                connected_instrument.write("TRIGger:A:LEVel:CH1 1")
+                connected_instrument.write("ACQuire:STATE 1")
+                time.sleep(2)
+
     except Exception as e:
         print(f"An error occurred during program execution: {e}")
     finally:
@@ -384,7 +393,6 @@ if __name__ == "__main__":
             event_counter += 1 # Increment for the final state duration
             log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, current_state, duration)
             print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds.")
-
 
         # After data acquisition stops, write to Excel if a datafile was created
         if datafile_name: # No longer dependent on num_channels_to_monitor > 0 for this logic
