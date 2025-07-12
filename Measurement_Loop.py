@@ -7,7 +7,7 @@ import os
 import pyvisa
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #10.101.100.151, 10.101.100.236, 10.101.100.254, 10.101.100.176
-SAVE_PATH = r"C:\Users\Calvert.Wong\OneDrive - qsc.com\Desktop\ScopeData" # Ensure this directory exists or create it
+SAVE_PATH = r"C:\Users\calve\Desktop" # Ensure this directory exists or create it
 
 def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: str = DEFAULT_IP_ADDRESS):
     """
@@ -74,54 +74,82 @@ def create_data_file_header(SAVE_PATH, fileName):
         print(f"An unexpected error occurred: {e}")
 
 # ************** MAIN    
-counter = 0  # trigger counter to track data record
-rm = pyvisa.ResourceManager()
-connected_instrument = connect_to_instrument(rm, DEFAULT_IP_ADDRESS)
+rm = None
+connected_instrument = None
+
+try:
+    counter = 0  # trigger counter to track data record
+    rm = pyvisa.ResourceManager()
+    connected_instrument = connect_to_instrument(rm, DEFAULT_IP_ADDRESS)
+        
+    if connected_instrument is None:
+        print("Failed to connect to the instrument. Exiting.")
+        exit() # Exit if connection failed
     
-# Generate a filename based on the current Date & Time
-dt = datetime.datetime.now()
-fileName = dt.strftime("%Y%m%d.txt")
+    # Generate a filename based on the current Date & Time
+    dt = datetime.datetime.now()
+    fileName = dt.strftime("%Y%m%d.txt")
 
-# Trigger ready level, mode, and set trigger
-connected_instrument.write("TRIGger:A:LEVel:CH1 5")
-connected_instrument.write("ACQuire:STOPAfter SEQUENCE")
-connected_instrument.write("ACQuire:STATE ON")
+    create_data_file_header(SAVE_PATH, fileName)
 
+    # Trigger ready level, mode, and set trigger
+    connected_instrument.write("TRIGger:A:LEVel:CH1 5")
+    connected_instrument.write("ACQuire:STOPAfter SEQUENCE")
+    connected_instrument.write("ACQuire:STATE ON")
 
-# Trigger Capture Loop
-while (True):
-    # Check if scope is triggered
-    status = connected_instrument.query('ACQuire:STATE?')
-    # print(f"Scope status: {status}")
+    # Trigger Capture Loop
+    while (True):
+        # Check if scope is triggered
+        status = connected_instrument.query('ACQuire:STATE?').strip() 
+        print(f"Scope status: {status}")
 
-    if status == '0' :  
-        # pause and write measurement stats
-        connected_instrument.write("ACQuire:STATE OFF")
-        connected_instrument.write("TRIGger:A:LEVel:CH1 5")  # reset trigger level
-        status = 1
-        counter += 1
-        print()
-        print("Trigger count- ", counter)
+        if status == '0' :  
+            # pause and write measurement stats
+            connected_instrument.write("ACQuire:STATE OFF")
+            connected_instrument.write("TRIGger:A:LEVel:CH1 5")  # reset trigger level
+            status = 1
+            counter += 1
+            print()
+            print("Trigger count- ", counter)
 
-        dt = datetime.datetime.now()
-        Vp2p = float(connected_instrument.query("MEASUrement:MEAS1:VALue?"))
-        Vrms = float(connected_instrument.query("MEASUrement:MEAS2:VALue?"))
-        if Vp2p > 1000:
-            Vp2p =999.999
-        if Vrms > 1000:
-            Vrms =999.999     
-        print(f"counter: {counter} Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
-        with open(os.path.join(SAVE_PATH, fileName), "a") as datafile:  # append mode
-            datafile.write(f"{counter:4.0f}, {dt.hour:02d}.{dt.minute:02d}.{dt.second:02d}, {Vp2p:.3f}, {Vrms:.3f}\n")
-            datafile.close()
+            dt = datetime.datetime.now()
+            Vp2p = float(connected_instrument.query("MEASUrement:MEAS1:VALue?"))
+            Vrms = float(connected_instrument.query("MEASUrement:MEAS2:VALue?"))
+            if Vp2p > 300:
+                Vp2p =300
+            if Vrms > 300:
+                Vrms =300     
+            print(f"counter: {counter} Vpk2pk: {Vp2p:.3f}, Vrms: {Vrms:.3f}")
+            with open(os.path.join(SAVE_PATH, fileName), "a") as datafile:  # append mode
+                datafile.write(f"{counter:4.0f}, {dt.hour:02d}.{dt.minute:02d}.{dt.second:02d}, {Vp2p:.3f}, {Vrms:.3f}\n")
+                datafile.close()
 
-        # ready next trigger
-        connected_instrument.write("ACQuire:STATE ON")
-        time.sleep(1)  # wait before checking again
-    else:
-        # print ("not triggered")
-        connected_instrument.write("TRIGger:A:LEVel:CH1 2.0")
-        connected_instrument.write("ACQuire:STATE ON")
-        time.sleep(1)  # wait before checking again
+            # ready next trigger
+            connected_instrument.write("ACQuire:STATE ON")
+            time.sleep(1)  # wait before checking again
+        else:
+            print ("not triggered")
+            connected_instrument.write("TRIGger:A:LEVel:CH1 2.0")
+            connected_instrument.write("ACQuire:STATE ON")
+            time.sleep(1)  # wait before checking again
 
+except KeyboardInterrupt:
+    print("\nProgram terminated by user (Ctrl+C).")
+except Exception as e:
+    print(f"An unexpected error occurred in the main loop: {e}")
+finally:
+    # Ensure resources are closed
+    if connected_instrument:
+        try:
+            connected_instrument.write("ACQuire:STATE OFF") # Stop acquisition before closing
+            connected_instrument.close()
+            print("Instrument connection closed.")
+        except pyvisa.errors.VisaIOError as e:
+            print(f"Error closing instrument connection: {e}")
+    if rm:
+        try:
+            rm.close()
+            print("Resource Manager closed.")
+        except Exception as e:
+            print(f"Error closing Resource Manager: {e}")
 
