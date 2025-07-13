@@ -79,9 +79,10 @@ connected_instrument = None
 
 try:
     counter = 0  # trigger counter to track data record
+
+    # Initialize the Resource Manager
     rm = pyvisa.ResourceManager()
     connected_instrument = connect_to_instrument(rm, DEFAULT_IP_ADDRESS)
-        
     if connected_instrument is None:
         print("Failed to connect to the instrument. Exiting.")
         exit() # Exit if connection failed
@@ -107,7 +108,6 @@ try:
             # pause and write measurement stats
             connected_instrument.write("ACQuire:STATE OFF")
             connected_instrument.write("TRIGger:A:LEVel:CH1 5")  # reset trigger level
-            status = 1
             counter += 1
             print()
             print("Trigger count- ", counter)
@@ -129,9 +129,9 @@ try:
             time.sleep(1)  # wait before checking again
         else:
             print ("not triggered")
-            connected_instrument.write("TRIGger:A:LEVel:CH1 2.0")
             connected_instrument.write("ACQuire:STATE ON")
-            time.sleep(1)  # wait before checking again
+            connected_instrument.write("TRIGger:A:LEVel:CH1 2.0")  # reset trigger level
+            time.sleep(1)
 
 except KeyboardInterrupt:
     print("\nProgram terminated by user (Ctrl+C).")

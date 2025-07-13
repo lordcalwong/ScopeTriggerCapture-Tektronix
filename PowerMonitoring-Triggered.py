@@ -1,7 +1,7 @@
-# Power Monitoring- Synchronous
+# Power Monitoring- Triggered
 #
 # Continuous monitor Amplifier Output channels and/or Line Inputs with
-# triggered time logging.
+# TRIGGERED time logging.
 #
 # User inputs IP address and number of channels to monitor (1-8), and
 # the option to set up scope or allow contiguous channels to be configured
@@ -9,7 +9,7 @@
 #
 # Saves data to csv file to user path or defaults to the desktop.
 #
-# Author: C. Wong 20250710
+# Author: C. Wong 20250712
 
 import time
 import datetime
@@ -115,12 +115,36 @@ def get_num_channels():
         except ValueError:
             print("Invalid input. Please enter a number.")
 
+def get_thresholds(on_trig_level: float = ON_THRESHOLD, off_trig_level: float = OFF_THRESHOLD):
+    """
+    Prompts the user for ON and OFF threshold levels for Vrms.
+    """
+    while (on_trig_level <= 0 or off_trig_level <= 0 or on_trig_level <= off_trig_level or on_trig_level >= MAX_VRMS or off_trig_level >= MAX_VRMS):
+        on_trig_level_input = input(
+            f"Enter trigger level for ON cycle ({on_trig_level}): "
+        ).strip()
+        if on_trig_level_input.lower() == 'd':
+            on_trig_level = on_trig_level
+        else:
+            on_trig_level = on_trig_level_input
+
+        off_trig_level_input = input(
+            f"Enter trigger level for ON cycle ({off_trig_level}): "
+        ).strip()
+        if off_trig_level_input.lower() == 'd':
+            off_trig_level = off_trig_level
+        else:
+            off_trig_level = off_trig_level_input
+    return on_trig_level, off_trig_level
+
 def setup_scope(scope_device, num_channels):
     """
     Configures channels for the specified number of channels.
     Minimally tries to set scale and position.
     """
     print("Ok. Setting up oscilloscope...", end='')
+
+    scope_device.write("*RST")  # Only needed for stubborn scopes
 
     for i in range(1, num_channels + 1):
         scope_device.write(f"SELect:CH{i} ON")
@@ -184,11 +208,11 @@ def log_duration_to_file(save_directory, data_file_name, event_count, start_time
     except IOError as e:
         print(f"Error appending data to file '{datafile_and_path}': {e}")
 
-def apply_vrms_bounds(v_rms):
+def apply_vrms_bounds(number: float) -> float:
     """
     Applies upper and lower bounds to the Vrms reading.
     """
-    return max(min(v_rms, MAX_VRMS), 0)
+    return max(min(number, MAX_VRMS), 0)
 
 def write_to_excel(datafile_name: str, save_directory: str): # num_channels removed
     """
@@ -248,152 +272,167 @@ def write_to_excel(datafile_name: str, save_directory: str): # num_channels remo
     except Exception as e:
         print(f"An error occurred while creating the Excel file: {e}")
 
-# --- MAIN ---
-if __name__ == "__main__":
-    # Initialize the Resource Manager
-    rm = pyvisa.ResourceManager('@py')
-    print("Resources found " , rm.list_resources())
+# ************** MAIN    
+rm = None
+connected_instrument = None
+
+try:
+    num_channels_to_monitor = 0
+    connected_instrument = None
+    datafile_name = None  # Initialize datafile_name to None
+    current_state = "UNKNOWN"  # Can be "ON" or "OFF"
+    last_state_change_time = datetime.datetime.now()
+    event_counter = 0
 
     # Register the 'q' hotkey
     keyboard.add_hotkey('q', on_q_press)
     keyboard.add_hotkey('esc', on_esc_press)
 
-    num_channels_to_monitor = 0
-    connected_instrument = None
-    datafile_name = None # Initialize datafile_name to None
+    # Initialize the Resource Manager
+    rm = pyvisa.ResourceManager()
+    connected_instrument = connect_to_instrument(rm, DEFAULT_IP_ADDRESS)
+    if connected_instrument is None:
+        print("Failed to connect to the instrument. Exiting.")
+        exit() # Exit if connection failed
 
-    # --- NEW State Management Variables ---
-    current_state = "UNKNOWN" # Can be "ON" or "OFF"
+    # Get the number of channels from the user
+    num_channels_to_monitor = get_num_channels()
+
+    # Get the number of channels from the user
+    Limits = get_thresholds()
+    print("Limit[0] = ", Limits[0], ", Limit[1] = ", Limits[1])
+
+    # Set up channels based on the user input
+    setup_needed = input("(L)eave scope alone or (S)etup contiguous channels?: ").strip()
+    if setup_needed.lower() == 'l':
+        print("Skipping scope setup. Ensure channels are configured correctly before starting data acquisition.")
+    else:
+        setup_scope(connected_instrument, num_channels_to_monitor)
+
+    # Create a data file for logging
     last_state_change_time = datetime.datetime.now()
-    event_counter = 0
-    # --------------------------------------
+    paths = make_datafile(last_state_change_time, DESKTOP)
+    user_path = paths[0]
+    datafile_name = paths[1]
+    full_data_path = os.path.join(user_path, datafile_name)
+    print("Created file for data as ", datafile_name)
 
-    try:
-        # Call the new function to connect to the instrument
-        connected_instrument = connect_to_instrument(rm, DEFAULT_IP_ADDRESS)
+    # Setting voltage thresholds for ON and OFF states
+    print(f"Monitoring for ON (all channels > {ON_THRESHOLD:.2f}Vrms) and OFF (all channels < {OFF_THRESHOLD:.2f}Vrms) states.")
+    print("Press 'q' or 'Crtl-C' to stop the program at any time.")
+    print("Starting monitoring...")
 
-        # Get the number of channels from the user
-        num_channels_to_monitor = get_num_channels()
+    # Main loop
+    while not stop_program_event.is_set():
+        time.sleep(0.1) # Small delay for keyboard input before checking if scope triggered
+        Status = connected_instrument.query('ACQuire:STATE?').strip()
 
-        # Set up channels based on the user input
-        setup_needed = input("(L)eave scope alone or (S)etup contiguous channels?:").strip()
-        if setup_needed.lower() == 'l':
-            print("Skipping scope setup. Ensure channels are configured correctly before starting data acquisition.")
-        else:
-            setup_scope(connected_instrument, num_channels_to_monitor)
+        if Status == '0' :  
+            # Scope triggered; turn off by setting super high level
+            connected_instrument.write("ACQuire:STATE OFF")
+            connected_instrument.write("TRIGger:A:LEVel:CH1 5")  # reset trigger level
+            print("Status = " , Status, ". Scope triggered.")
+            event_counter += 1
+            print("Trigger count- ", event_counter)
+            current_time = datetime.datetime.now()
 
-        # Create a data file for logging
-        starting_date_and_time = datetime.datetime.now()
-        paths = make_datafile(starting_date_and_time, DESKTOP) # num_channels removed
-        user_path = paths[0]
-        datafile_name = paths[1]
-        full_data_path = os.path.join(user_path, datafile_name)
-        print("Created file for data as ", datafile_name)
+            # Read measurements
+            v_rms_readings = []
+            for i in range(1, num_channels_to_monitor + 1):
+                try:
+                    v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
+                    # Apply bounds using the new routine call
+                    v_rms = apply_vrms_bounds(v_rms)
+                    v_rms_readings.append(v_rms)
+                except pyvisa.errors.VisaIOError as e:
+                    print(f"Error reading RMS for Channel {i}: {e}. Skipping this channel for this sample.")
+                    v_rms_readings.append(float('NAN')) # Append NaN if reading fails
+                except ValueError:
+                    print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
+                    v_rms_readings.append(float('NAN'))
 
-        print(f"Monitoring for ON (all channels > {ON_THRESHOLD:.2f}Vrms) and OFF (all channels < {OFF_THRESHOLD:.2f}Vrms) states.")
-        print("Press 'q' or 'Crtl-C' to stop the program at any time.")
-        print("Starting monitoring...")
+            # Check if any readings are NaN, if so, we can't determine state reliably
+            if any(v == float('NAN') for v in v_rms_readings):
+                print("Warning: Skipping state evaluation due to invalid Vrms readings.")
+                continue
 
-        # Main loop
-        while not stop_program_event.is_set():
-            time.sleep(0.1) # Small delay for keyboard input before checking if scope triggered
-            Status = connected_instrument.query('ACQuire:STATE?')
+            # Check state change and log to file
+            all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings)
+            all_channels_off = all(v <= OFF_THRESHOLD for v in v_rms_readings)
 
-            if Status == '0' :  
-                # Scope triggered; turn off by setting super high level
-                connected_instrument.write("TRIGger:A:LEVel:CH1 50")
-                print("Status = " , Status, ". Scope triggered.")
+            if current_state == "UNKNOWN":
+                if all_channels_on:
+                    new_state = "ON"
+                    current_state = new_state
+                elif all_channels_off:
+                    new_state = "OFF"
+                    current_state = new_state
 
-                v_rms_readings = []
-                for i in range(1, num_channels_to_monitor + 1):
-                    try:
-                        v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
-                        # Apply bounds using the new routine call
-                        v_rms = apply_vrms_bounds(v_rms)
-                        v_rms_readings.append(v_rms)
-                    except pyvisa.errors.VisaIOError as e:
-                        print(f"Error reading RMS for Channel {i}: {e}. Skipping this channel for this sample.")
-                        v_rms_readings.append(float('NAN')) # Append NaN if reading fails
-                    except ValueError:
-                        print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
-                        v_rms_readings.append(float('NAN'))
+            if current_state == "OFF":
+                if all_channels_on:
+                    # Transition from OFF to ON
+                    new_state = "ON"
+                    duration = (current_time - last_state_change_time).total_seconds()
+                    event_counter += 1
+                    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "OFF", duration)
+                    print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
+                    current_state = new_state
+                    last_state_change_time = current_time
 
-                # Check if any readings are NaN, if so, we can't determine state reliably
-                if any(v == float('NAN') for v in v_rms_readings):
-                    print("Warning: Skipping state evaluation due to invalid Vrms readings.")
-                    continue
+            elif current_state == "ON":
+                if all_channels_off:
+                    # Transition from ON to OFF
+                    new_state = "OFF"
+                    duration = (current_time - last_state_change_time).total_seconds()
+                    event_counter += 1
+                    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "ON", duration)
+                    print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds.")
+                    current_state = new_state
+                    last_state_change_time = current_time
 
-                all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings)
-                all_channels_off = all(v <= OFF_THRESHOLD for v in v_rms_readings)
-                current_time = datetime.datetime.now()
-                new_state = current_state # Assume state doesn't change unless conditions met
+            # Print readings for user 
+            print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
+            for i, v_rms in enumerate(v_rms_readings):
+                print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
+            print(print_output + f" -> State: {current_state}")
 
-                if current_state == "UNKNOWN":
-                    if all_channels_on:
-                        new_state = "ON"
-                    elif all_channels_off:
-                        new_state = "OFF"
-                    # If still UNKNOWN (e.g., in transition), just keep polling
-                    if new_state != "UNKNOWN":
-                        current_state = new_state
-                        last_state_change_time = current_time
-                        print(f"Initial state determined: {current_state} at {current_time.strftime('%Y-%m-%d %H:%M:%S.%f')}")
+            # ready next trigger
+            connected_instrument.write("ACQuire:STATE ON")
+            time.sleep(1)  # wait before checking again
 
-                elif current_state == "OFF":
-                    if all_channels_on:
-                        # Transition from OFF to ON
-                        new_state = "ON"
-                        duration = (current_time - last_state_change_time).total_seconds()
-                        event_counter += 1
-                        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "OFF", duration)
-                        print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
-                        current_state = new_state
-                        last_state_change_time = current_time
+        elif Status == '1': # Still awaiting trigger
+            print ("not triggered")
+            connected_instrument.write("ACQuire:MODe SAMPLE")
+            connected_instrument.write("ACQuire:STOPAfter SEQuence")
+            connected_instrument.write("TRIGger:A:LEVel:CH1 2.0") # Revise trigger level and verify triggered
+            connected_instrument.write("ACQuire:STATE ON")
+            time.sleep(2)
 
-                elif current_state == "ON":
-                    if all_channels_off:
-                        # Transition from ON to OFF
-                        new_state = "OFF"
-                        duration = (current_time - last_state_change_time).total_seconds()
-                        event_counter += 1
-                        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "ON", duration)
-                        print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds.")
-                        current_state = new_state
-                        last_state_change_time = current_time
-
-                # Print current readings for monitoring purposes
-                print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
-                for i, v_rms in enumerate(v_rms_readings):
-                    print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
-                print(print_output + f" -> State: {current_state}")
-
-            elif Status == '1': #Status is 1. Still awaiting trigger
-                # Revise trigger level and verify triggered
-                print("Status = ", Status, ". Still waiting for trigger.")
-                connected_instrument.write("TRIGger:A:LEVel:CH1 1")
-                connected_instrument.write("ACQuire:STATE 1")
-                time.sleep(2)
-
-    except Exception as e:
-        print(f"An error occurred during program execution: {e}")
-    finally:
-        # Always close the instrument connection and resource manager
-        if 'connected_instrument' in locals() and connected_instrument:
-            print("Closing instrument connection.")
+except KeyboardInterrupt:
+    print("\nProgram terminated by user (Ctrl+C).")
+except Exception as e:
+    print(f"An error occurred during program execution: {e}")
+finally:
+    # Always close the instrument connection and resource manager
+    if 'connected_instrument' in locals() and connected_instrument:
+        try:
+            connected_instrument.write("ACQuire:STATE OFF") # Stop acquisition before closing
             connected_instrument.write("CLEAR") # Ensure scope acquisition is stopped
             connected_instrument.close()
-        if rm:
-            print("Closing Resource Manager.")
+            print("Instrument connection closed.")
+        except pyvisa.errors.VisaIOError as e:
+            print(f"Error closing instrument connection: {e}")
+    if rm:
+        try:
             rm.close()
+            print("Resource Manager closed.")
+        except Exception as e:
+            print(f"Error closing Resource Manager: {e}")
 
-        # Before exiting, log the duration of the final state if it was not already logged
-        if current_state != "UNKNOWN":
-            final_time = datetime.datetime.now()
-            duration = (final_time - last_state_change_time).total_seconds()
-            event_counter += 1 # Increment for the final state duration
-            log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, current_state, duration)
-            print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds.")
-
-        # After data acquisition stops, write to Excel if a datafile was created
-        if datafile_name: # No longer dependent on num_channels_to_monitor > 0 for this logic
-            write_to_excel(datafile_name, user_path)
+    # Before exiting, log the duration of the final state if it was not already logged
+    if current_state != "UNKNOWN":
+        final_time = datetime.datetime.now()
+        duration = (final_time - last_state_change_time).total_seconds()
+        event_counter += 1 # Increment for the final state duration
+        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, current_state, duration)
+        print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds.")
