@@ -1,13 +1,17 @@
 # Power Monitoring- Triggered
 #
-# Continuous monitor Amplifier Output channels and/or Line Inputs for
-# TRIGGERED events.
-#
-# In-work and unfinished. This is a work in progress.
+# Continuously monitor amplifier output channels (and/or AC Line) to log 
+# ON/OFF times (with better than 1 second resolution).
+# 
+# Scope trigger must be autorun.
+
+# User inputs IP address and number of channels to monitor (1-8), and
+# the option to set up scope or allow contiguous channels to be configured
+# for RMS measurements.  User sets desired ON or OFF threshold.
 #
 # Saves data to csv file to user path or defaults to the desktop.
 #
-# Author: C. Wong XXXXXXXX
+# Author: C. Wong XXXX in-work
 
 import time
 import datetime
@@ -150,14 +154,6 @@ def setup_scope(scope_device, num_channels):
         scope_device.write(f"CH{i}:POSition 0")
         scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")   # Need separate STATE 1 command for DPO
         scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")  # Need separate TYPE command for MSO
-    # scope_device.write("TRIGger:A:EDGE:SOUrce CH1")
-    # scope_device.write("TRIGger:A:EDGE:COUPling DC")
-    # scope_device.write("TRIGger:A:EDGE:SLOpe RISE")
-    # scope_device.write("TRIGger:A:LEVel:CH1 50")  #Set initially to high level to delay trigger
-    # scope_device.write("TRIGger:A:MODe NORMal")
-    # scope_device.write("TRIGger:A:TYPe EDGE")
-    # scope_device.write("ACQuire:STOPAfter SEQUENCE")
-    # scope_device.write("ACQuire:STATE ON")
 
     # Wait for scope to finish setting up
     scope_device.query("*OPC?")
@@ -194,6 +190,12 @@ def make_datafile(timestamp, desktoppath: str = DESKTOP): # num_channels removed
         except ValueError:
             print("Invalid path. Please enter a valid path.")
 
+def apply_vrms_bounds(number: float) -> float:
+    """
+    Applies upper and lower bounds to the Vrms reading.
+    """
+    return max(min(number, MAX_VRMS), 0)
+
 def log_duration_to_file(save_directory, data_file_name, event_count, start_time, end_time, state, duration_seconds):
     """
     Appends duration data to the specified file.
@@ -205,12 +207,6 @@ def log_duration_to_file(save_directory, data_file_name, event_count, start_time
             f.write(line + "\n")
     except IOError as e:
         print(f"Error appending data to file '{datafile_and_path}': {e}")
-
-def apply_vrms_bounds(number: float) -> float:
-    """
-    Applies upper and lower bounds to the Vrms reading.
-    """
-    return max(min(number, MAX_VRMS), 0)
 
 def write_to_excel(datafile_name: str, save_directory: str): # num_channels removed
     """
@@ -297,10 +293,12 @@ try:
     num_channels_to_monitor = get_num_channels()
 
     # Get the number of channels from the user
-    Limits = get_thresholds()
-    print("Limit[0] = ", Limits[0], ", Limit[1] = ", Limits[1])
+    limits = get_thresholds()
+    high_limit = limits[0]
+    low_limit = limits[1]
+    print("high_limit = ", high_limit, ", low_limit = ", low_limit)
 
-    # Set up channels based on the user input
+    # Set up channels if needed based on the user input
     setup_needed = input("(L)eave scope alone or (S)etup contiguous channels?: ").strip()
     if setup_needed.lower() == 'l':
         print("Skipping scope setup. Ensure channels are configured correctly before starting data acquisition.")
@@ -315,24 +313,18 @@ try:
     full_data_path = os.path.join(user_path, datafile_name)
     print("Created file for data as ", datafile_name)
 
-    # Setting voltage thresholds for ON and OFF states
-    print(f"Monitoring for ON (all channels > {ON_THRESHOLD:.2f}Vrms) and OFF (all channels < {OFF_THRESHOLD:.2f}Vrms) states.")
-    print("Press 'q' or 'Crtl-C' to stop the program at any time.")
+    # Notify user off and running
+    print(f"Monitoring for ON (all channels > {high_limit:.2f} Vrms) and OFF (all channels < {low_limit:.2f} Vrms) states.")
+    print("Press 'q','esc', or 'Crtl-C' to stop the program at any time.")
     print("Starting monitoring...")
 
     # Main loop
     while not stop_program_event.is_set():
         time.sleep(0.1) # Small delay for keyboard input before checking if scope triggered
-        Status = connected_instrument.query('ACQuire:STATE?').strip()
 
-        if Status == '0' :  
-            # Scope triggered; turn off by setting super high level
-            connected_instrument.write("ACQuire:STATE OFF")
-            connected_instrument.write("TRIGger:A:LEVel:CH1 5")  # reset trigger level
-            print("Status = " , Status, ". Scope triggered.")
-            event_counter += 1
-            print("Trigger count- ", event_counter)
-            current_time = datetime.datetime.now()
+  
+            # Set trigger level for ON
+            connected_instrument.write("TRIGger:A:LEVel:CH1", high_limit)
 
             # Read measurements
             v_rms_readings = []
@@ -358,6 +350,17 @@ try:
             all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings)
             all_channels_off = all(v <= OFF_THRESHOLD for v in v_rms_readings)
 
+
+            event_counter += 1
+            print("Trigger count- ", event_counter)
+        
+
+
+
+
+
+        
+            current_time = datetime.datetime.now()
             if current_state == "UNKNOWN":
                 if all_channels_on:
                     new_state = "ON"
