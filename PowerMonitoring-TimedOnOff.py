@@ -25,8 +25,8 @@ from openpyxl import Workbook
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
 MAX_VRMS = 50
-ON_THRESHOLD = 3.0  #default trigger levels for 'ON'
-OFF_THRESHOLD = 1.0 #default trigger levels for 'OFF'
+ON_THRESHOLD = 1.5  #default trigger levels for 'ON'
+OFF_THRESHOLD = 0.1 #default trigger levels for 'OFF'
 
 # Find user desktop one level down from home (~/* /Desktop) and set up as optional save path
 from glob import glob
@@ -274,25 +274,24 @@ try:
     num_channels_to_monitor = 0
     connected_instrument = None
     datafile_name = None  # Initialize datafile_name to None
-    current_state = "UNKNOWN"  # Can be "ON" or "OFF"
-    last_state_change_time = datetime.datetime.now()
-    event_counter = 0
+    current_state = "OFF"  # States can be "ON" or "OFF"
+    previous_state = current_state  # Previous state for comparison
 
     # Register the 'q' hotkey
     keyboard.add_hotkey('q', on_q_press)
     keyboard.add_hotkey('esc', on_esc_press)
 
-    # Initialize the Resource Manager
+    # Initialize Resource Manager
     rm = pyvisa.ResourceManager()
     connected_instrument = connect_to_instrument(rm, DEFAULT_IP_ADDRESS)
     if connected_instrument is None:
         print("Failed to connect to the instrument. Exiting.")
         exit() # Exit if connection failed
 
-    # Get the number of channels from the user
+    # Get the number of channels from user
     num_channels_to_monitor = get_num_channels()
 
-    # Get the number of channels from the user
+    # Get desired ON/OFF thresholds from user
     limits = get_thresholds()
     high_limit = limits[0]
     low_limit = limits[1]
@@ -318,96 +317,77 @@ try:
     print("Press 'q','esc', or 'Crtl-C' to stop the program at any time.")
     print("Starting monitoring...")
 
+    last_state_change_time = datetime.datetime.now()
+    event_counter = 0
+    
     # Main loop
     while not stop_program_event.is_set():
         time.sleep(0.1) # Small delay for keyboard input before checking if scope triggered
-
   
-            # Set trigger level for ON
-            connected_instrument.write("TRIGger:A:LEVel:CH1", high_limit)
+        # Set trigger level for ON
+        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
 
-            # Read measurements
-            v_rms_readings = []
-            for i in range(1, num_channels_to_monitor + 1):
-                try:
-                    v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
-                    # Apply bounds using the new routine call
-                    v_rms = apply_vrms_bounds(v_rms)
-                    v_rms_readings.append(v_rms)
-                except pyvisa.errors.VisaIOError as e:
-                    print(f"Error reading RMS for Channel {i}: {e}. Skipping this channel for this sample.")
-                    v_rms_readings.append(float('NAN')) # Append NaN if reading fails
-                except ValueError:
-                    print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
-                    v_rms_readings.append(float('NAN'))
+        # Read measurements
+        current_time = datetime.datetime.now()
+        v_rms_readings = []
+        for i in range(1, num_channels_to_monitor + 1):
+            try:
+                v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
+                # Apply bounds using the new routine call
+                v_rms = apply_vrms_bounds(v_rms)
+                v_rms_readings.append(v_rms)
+            except pyvisa.errors.VisaIOError as e:
+                print(f"Error reading RMS for Channel {i}: {e}. Skipping this channel for this sample.")
+                v_rms_readings.append(float('NAN')) # Append NaN if reading fails
+            except ValueError:
+                print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
+                v_rms_readings.append(float('NAN'))
 
-            # Check if any readings are NaN, if so, we can't determine state reliably
-            if any(v == float('NAN') for v in v_rms_readings):
-                print("Warning: Skipping state evaluation due to invalid Vrms readings.")
-                continue
+        # Print readings for user 
+        print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
+        for i, v_rms in enumerate(v_rms_readings):
+            print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
+        print(print_output + f" -> State: {current_state}")
 
-            # Check state change and log to file
-            all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings)
-            all_channels_off = all(v <= OFF_THRESHOLD for v in v_rms_readings)
+        # Check if any readings are NaN, if so, we can't determine state reliably
+        if any(v == float('NAN') for v in v_rms_readings):
+            print("Warning: Skipping state evaluation due to invalid Vrms readings.")
+            continue
 
+        # Check for state change
+        all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings)
+        all_channels_off = all(v <= OFF_THRESHOLD for v in v_rms_readings)
+        if current_state == "UNKNOWN":
+            if all_channels_on:
+                new_state = "ON"
+                current_state = new_state
+                last_state_change_time = datetime.datetime.now()
+            elif all_channels_off:
+                new_state = "OFF"
+                current_state = new_state
+                last_state_change_time = datetime.datetime.now()
 
-            event_counter += 1
-            print("Trigger count- ", event_counter)
-        
+        if current_state == "OFF":
+            if all_channels_on:
+                # Transition from OFF to ON
+                new_state = "ON"
+                duration = (current_time - last_state_change_time).total_seconds()
+                event_counter += 1
+                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "OFF", duration)
+                print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
+                current_state = new_state
+                last_state_change_time = current_time
 
-
-
-
-
-        
-            current_time = datetime.datetime.now()
-            if current_state == "UNKNOWN":
-                if all_channels_on:
-                    new_state = "ON"
-                    current_state = new_state
-                elif all_channels_off:
-                    new_state = "OFF"
-                    current_state = new_state
-
-            if current_state == "OFF":
-                if all_channels_on:
-                    # Transition from OFF to ON
-                    new_state = "ON"
-                    duration = (current_time - last_state_change_time).total_seconds()
-                    event_counter += 1
-                    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "OFF", duration)
-                    print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
-                    current_state = new_state
-                    last_state_change_time = current_time
-
-            elif current_state == "ON":
-                if all_channels_off:
-                    # Transition from ON to OFF
-                    new_state = "OFF"
-                    duration = (current_time - last_state_change_time).total_seconds()
-                    event_counter += 1
-                    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "ON", duration)
-                    print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds.")
-                    current_state = new_state
-                    last_state_change_time = current_time
-
-            # Print readings for user 
-            print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
-            for i, v_rms in enumerate(v_rms_readings):
-                print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
-            print(print_output + f" -> State: {current_state}")
-
-            # ready next trigger
-            connected_instrument.write("ACQuire:STATE ON")
-            time.sleep(1)  # wait before checking again
-
-        elif Status == '1': # Still awaiting trigger
-            print ("not triggered")
-            connected_instrument.write("ACQuire:MODe SAMPLE")
-            connected_instrument.write("ACQuire:STOPAfter SEQuence")
-            connected_instrument.write("TRIGger:A:LEVel:CH1 2.0") # Revise trigger level and verify triggered
-            connected_instrument.write("ACQuire:STATE ON")
-            time.sleep(2)
+        elif current_state == "ON":
+            if all_channels_off:
+                # Transition from ON to OFF
+                new_state = "OFF"
+                duration = (current_time - last_state_change_time).total_seconds()
+                event_counter += 1
+                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, "ON", duration)
+                print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds.")
+                current_state = new_state
+                last_state_change_time = current_time
 
 except KeyboardInterrupt:
     print("\nProgram terminated by user (Ctrl+C).")
@@ -431,9 +411,8 @@ finally:
             print(f"Error closing Resource Manager: {e}")
 
     # Before exiting, log the duration of the final state if it was not already logged
-    if current_state != "UNKNOWN":
-        final_time = datetime.datetime.now()
-        duration = (final_time - last_state_change_time).total_seconds()
-        event_counter += 1 # Increment for the final state duration
-        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, current_state, duration)
-        print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds.")
+    final_time = datetime.datetime.now()
+    duration = (final_time - last_state_change_time).total_seconds()
+    event_counter += 1 # Increment for the final state duration
+    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, current_state, duration)
+    print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds.")
