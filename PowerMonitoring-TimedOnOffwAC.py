@@ -1,17 +1,17 @@
 # Power Monitoring- Triggered
 #
-# Continuously monitor amplifier output channels (and/or AC Line) to log 
-# ON/OFF times (with better than 1 second resolution).
+# Continuously monitor amplifier output channels (CH2+) and an AC Line
+# monitor (CH1) to log ON/OFF times (with better than 1 second resolution).
 # 
 # Scope trigger must be autorun.
-
+#
 # User inputs IP address and number of channels to monitor (1-8), and
 # the option to set up scope or allow contiguous channels to be configured
 # for RMS measurements.  User sets desired ON or OFF threshold.
 #
 # Saves data to csv file to user path or defaults to the desktop.
 #
-# Author: C. Wong 20250722
+# Author: C. Wong 20250723
 
 import time
 import datetime
