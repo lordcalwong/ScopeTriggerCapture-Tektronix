@@ -11,7 +11,7 @@
 #
 # Saves data to csv file to user path or defaults to the desktop.
 #
-# Author: C. Wong XXXX in-work
+# Author: C. Wong 20250722
 
 import time
 import datetime
@@ -117,27 +117,44 @@ def get_num_channels():
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-def get_thresholds(on_trig_level: float = ON_THRESHOLD, off_trig_level: float = OFF_THRESHOLD):
+def get_thresholds(default_on_trig: float = ON_THRESHOLD, default_off_trig: float = OFF_THRESHOLD):
     """
-    Prompts the user for ON and OFF threshold levels for Vrms.
+    Prompts the user for ON and OFF threshold levels for Vrms,
+    validating the inputs.
     """
-    while (on_trig_level <= 0 or off_trig_level <= 0 or on_trig_level <= off_trig_level or on_trig_level >= MAX_VRMS or off_trig_level >= MAX_VRMS):
-        on_trig_level_input = input(
-            f"Enter trigger level for ON cycle ({on_trig_level}): "
-        ).strip()
-        if on_trig_level_input.lower() == 'd':
-            on_trig_level = on_trig_level
-        else:
-            on_trig_level = on_trig_level_input
+    on_trig_level = default_on_trig
+    off_trig_level = default_off_trig
 
-        off_trig_level_input = input(
-            f"Enter trigger level for ON cycle ({off_trig_level}): "
-        ).strip()
-        if off_trig_level_input.lower() == 'd':
-            off_trig_level = off_trig_level
-        else:
-            off_trig_level = off_trig_level_input
-    return on_trig_level, off_trig_level
+    while True:
+        try:
+            on_trig_input = input(f"Enter trigger level for ON cycle (default: {on_trig_level:.2f}V, 'd' for default): ").strip()
+            if on_trig_input.lower() == 'd':
+                on_trig_level = default_on_trig
+            else:
+                on_trig_level = float(on_trig_input)
+
+            off_trig_input = input(f"Enter trigger level for OFF cycle (default: {off_trig_level:.2f}V, 'd' for default): ").strip()
+            if off_trig_input.lower() == 'd':
+                off_trig_level = default_off_trig
+            else:
+                off_trig_level = float(off_trig_input)
+
+            # Validate the thresholds
+            if on_trig_level <= 0:
+                print("Error: ON threshold must be greater than 0.")
+            elif off_trig_level <= 0:
+                print("Error: OFF threshold must be greater than 0.")
+            elif on_trig_level >= MAX_VRMS:
+                print(f"Error: ON threshold must be less than {MAX_VRMS}V.")
+            elif off_trig_level >= on_trig_level:
+                print("Error: OFF threshold must be less than the ON threshold.")
+            else:
+                return on_trig_level, off_trig_level # Valid inputs, exit loop
+
+        except ValueError:
+            print("Invalid input. Please enter a numerical value or 'd' for default.")
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
 
 def setup_scope(scope_device, num_channels):
     """
@@ -330,6 +347,7 @@ try:
         # Read measurements
         current_time = datetime.datetime.now()
         v_rms_readings = []
+        
         for i in range(1, num_channels_to_monitor + 1):
             try:
                 v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
@@ -343,16 +361,16 @@ try:
                 print(f"Could not convert RMS reading for Channel {i} to float. Skipping.")
                 v_rms_readings.append(float('NAN'))
 
-        # Print readings for user 
-        print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
-        for i, v_rms in enumerate(v_rms_readings):
-            print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
-        print(print_output + f" -> State: {current_state}")
-
         # Check if any readings are NaN, if so, we can't determine state reliably
         if any(v == float('NAN') for v in v_rms_readings):
             print("Warning: Skipping state evaluation due to invalid Vrms readings.")
             continue
+
+        # Print readings for user if needed for diagnostics
+        # print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
+        # for i, v_rms in enumerate(v_rms_readings):
+        #     print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
+        # print(print_output + f" -> State: {current_state}")
 
         # Check for state change
         all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings)
