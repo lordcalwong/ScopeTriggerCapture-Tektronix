@@ -27,8 +27,8 @@ from openpyxl import Workbook
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
 MAX_VRMS = 50  # ~312 W arbitrary limit per audio CH  (except for AC Line, CH1)
-ON_THRESHOLD = 1.5  #default trigger levels for 'ON' per audio CH
-OFF_THRESHOLD = 0.1 #default trigger levels for 'OFF' per audio CH
+ON_THRESHOLD = 9.0  #default trigger levels for 'ON' per audio CH
+OFF_THRESHOLD = 2.0 #default trigger levels for 'OFF' per audio CH
 LINE_VOLTAGE_WINDOW_SIZE = 4 # Define the window size for the running average
 
 # Find user desktop one level down from home [~/* /Desktop] as optional path
@@ -328,7 +328,7 @@ try:
     num_channels_to_monitor = 0
     connected_instrument = None
     datafile_name = None  # Initialize datafile_name to None
-    current_state = "OFF"  # States can be "ON" or "OFF"
+    current_state = "UNKNOWN"  # States can be "ON" or "OFF"
     previous_state = current_state  # Previous state for comparison
 
     # Register the 'q' hotkey
@@ -377,7 +377,7 @@ try:
         time.sleep(0.05) # Small delay for keyboard input before checking if scope triggered
   
         # Check scoope in run mode
-        connected_instrument.write("ACQuire:STATE OFF")  # Check scope in run mode
+        connected_instrument.write("ACQuire:STATE ON")
 
         # Read measurements
         current_time = datetime.datetime.now()
@@ -436,6 +436,7 @@ try:
                 current_state = new_state
                 last_state_change_time = datetime.datetime.now()
                 connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
+            continue
 
         if current_state == "OFF":
             if all_channels_on:
@@ -460,6 +461,12 @@ try:
                 current_state = new_state
                 last_state_change_time = current_time
                 connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
+
+        # debug        
+        print(f"CH2+ Readings for State Check: {[f'{v:.3f}' for v in v_rms_readings_for_state_check]}")
+        print(f"All channels ON condition: {all_channels_on}")
+        print(f"All channels OFF condition: {all_channels_off}")
+        print(f"Current State: {current_state}")
 
 except KeyboardInterrupt:
     print("\nProgram terminated by user (Ctrl+C).")
