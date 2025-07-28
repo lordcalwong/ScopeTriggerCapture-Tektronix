@@ -26,9 +26,9 @@ from collections import deque  #only needed for running average on AC Line
 from openpyxl import Workbook
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
-MAX_VRMS = 50  # ~312 W arbitrary limit per CH
-ON_THRESHOLD = 1.5  #default trigger levels for 'ON'
-OFF_THRESHOLD = 0.1 #default trigger levels for 'OFF'
+MAX_VRMS = 50  # ~312 W arbitrary limit per audio CH  (except for AC Line, CH1)
+ON_THRESHOLD = 1.5  #default trigger levels for 'ON' per audio CH
+OFF_THRESHOLD = 0.1 #default trigger levels for 'OFF' per audio CH
 LINE_VOLTAGE_WINDOW_SIZE = 4 # Define the window size for the running average
 
 # Find user desktop one level down from home [~/* /Desktop] as optional path
@@ -176,7 +176,7 @@ def setup_scope(scope_device, num_channels):
         scope_device.write(f"SELect:CH{i} ON")
         scope_device.write(f"CH{i}:POSition 0")
         if i == 1:
-            scope_device.write(f"CH{1}:SCALe 50")
+            scope_device.write(f"CH{1}:SCALe 100")
         else:
             scope_device.write(f"CH{i}:SCALe 10")
         scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")   # Need separate STATE 1 command for DPO
