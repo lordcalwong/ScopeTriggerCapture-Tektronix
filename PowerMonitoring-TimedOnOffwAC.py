@@ -445,7 +445,7 @@ try:
                 duration = (current_time - last_state_change_time).total_seconds()
                 event_counter += 1
                 log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, 0.0, "OFF", duration) 
-                print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds. Line Voltage: 0.000Vrms (Hardcoded for OFF state)")
+                print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds. Line Voltage < {OFF_THRESHOLD:.3f}Vrms")
                 current_state = new_state
                 last_state_change_time = current_time
                 connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}")
@@ -462,11 +462,11 @@ try:
                 last_state_change_time = current_time
                 connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
 
-        # debug        
-        print(f"CH2+ Readings for State Check: {[f'{v:.3f}' for v in v_rms_readings_for_state_check]}")
-        print(f"All channels ON condition: {all_channels_on}")
-        print(f"All channels OFF condition: {all_channels_off}")
-        print(f"Current State: {current_state}")
+        # # debug        
+        # print(f"CH2+ Readings for State Check: {[f'{v:.3f}' for v in v_rms_readings_for_state_check]}")
+        # print(f"All channels ON condition: {all_channels_on}")
+        # print(f"All channels OFF condition: {all_channels_off}")
+        # print(f"Current State: {current_state}")
 
 except KeyboardInterrupt:
     print("\nProgram terminated by user (Ctrl+C).")
