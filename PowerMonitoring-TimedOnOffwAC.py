@@ -444,8 +444,8 @@ try:
                 new_state = "ON"
                 duration = (current_time - last_state_change_time).total_seconds()
                 event_counter += 1
-                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, current_line_voltage_avg, "OFF", duration)
-                print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds. Line Voltage: {current_line_voltage_avg:.3f}Vrms")
+                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, 0.0, "OFF", duration) 
+                print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds. Line Voltage: 0.000Vrms (Hardcoded for OFF state)")
                 current_state = new_state
                 last_state_change_time = current_time
                 connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}")
@@ -493,5 +493,9 @@ finally:
     final_time = datetime.datetime.now()
     duration = (final_time - last_state_change_time).total_seconds()
     event_counter += 1 # Increment for the final state duration
-    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, current_line_voltage_avg, current_state, duration) 
-    print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage: {current_line_voltage_avg:.3f}Vrms") 
+    if current_state == "OFF":
+        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, 0.0, current_state, duration) # Changed line_voltage_avg to 0.0
+        print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage: 0.000Vrms (Hardcoded for OFF state)")
+    else: # If the final state was ON, use the current_line_voltage_avg
+        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, current_line_voltage_avg, current_state, duration) 
+        print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage: {current_line_voltage_avg:.3f}Vrms") 
