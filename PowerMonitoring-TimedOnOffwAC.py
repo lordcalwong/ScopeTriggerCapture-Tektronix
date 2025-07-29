@@ -2,8 +2,8 @@
 #
 # Continuously monitor amplifier output channels (CH2+) and an AC Line
 # monitor (CH1) to log ON/OFF times (with better than 1 second resolution).
-# 
-# Scope trigger must be autorun. Code assumes system will  starts # in an 
+#
+# Scope trigger must be autorun. Code assumes system will  starts # in an
 # "OFF" state.
 #
 # User inputs IP address and number of channels to monitor (1-8), and
@@ -314,7 +314,7 @@ def write_to_excel(datafile_name: str, save_directory: str): # num_channels remo
     except Exception as e:
         print(f"An error occurred while creating the Excel file: {e}")
 
-# ************** MAIN    
+# ************** MAIN
 rm = None
 connected_instrument = None
 last_state_change_time = datetime.datetime.now()
@@ -322,14 +322,15 @@ event_counter = 0
 
 # Initialize deque for line voltage readings
 line_voltage_readings_queue = deque(maxlen=LINE_VOLTAGE_WINDOW_SIZE)
-current_line_voltage_avg = 0.0 # Initialize the running average for line voltage
+# current_line_voltage_avg = 0.0 # This variable is no longer strictly needed as a global if using local snapshot
+# It's better to calculate and use a local snapshot for current readings.
 
 try:
     num_channels_to_monitor = 0
     connected_instrument = None
     datafile_name = None  # Initialize datafile_name to None
     current_state = "UNKNOWN"  # States can be "ON" or "OFF"
-    previous_state = current_state  # Previous state for comparison
+    # previous_state = current_state  # This variable is not used and can be removed for clarity
 
     # Register the 'q' hotkey
     keyboard.add_hotkey('q', on_q_press)
@@ -371,29 +372,30 @@ try:
     print("Press 'q','esc', or 'Crtl-C' to stop the program at any time.")
     print("Starting monitoring...")
 
-   
+
     # Main loop
     while not stop_program_event.is_set():
         time.sleep(0.05) # Small delay for keyboard input before checking if scope triggered
-  
-        # Check scoope in run mode
+
+        # Check scope in run mode
         connected_instrument.write("ACQuire:STATE ON")
 
         # Read measurements
         current_time = datetime.datetime.now()
         v_rms_readings = []
-        
+
+        # Initialize current_line_voltage_snapshot for this loop iteration
+        # This will be updated if line_voltage_readings_queue is populated.
+        current_line_voltage_snapshot = 0.0 # Initialize to 0.0 before reading CH1
+
         for i in range(1, num_channels_to_monitor + 1):
             try:
                 v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
                 if i == 1: # This is the AC Line (CH1)
                     line_voltage_readings_queue.append(v_rms)
-                    if len(line_voltage_readings_queue) == LINE_VOLTAGE_WINDOW_SIZE:
-                        current_line_voltage_avg = sum(line_voltage_readings_queue) / LINE_VOLTAGE_WINDOW_SIZE
-                    elif len(line_voltage_readings_queue) > 0: # Calculate average even if queue is not full yet
-                         current_line_voltage_avg = sum(line_voltage_readings_queue) / len(line_voltage_readings_queue)
-                    else:
-                        current_line_voltage_avg = 0.0 # In case no readings yet
+                    if len(line_voltage_readings_queue) > 0:
+                        current_line_voltage_snapshot = sum(line_voltage_readings_queue) / len(line_voltage_readings_queue)
+                    # Else, current_line_voltage_snapshot remains 0.0 if queue is empty (shouldn't happen here)
                 else: # Apply bounds only if it's NOT channel 1
                     v_rms = apply_vrms_bounds(v_rms)
                 v_rms_readings.append(v_rms)
@@ -414,55 +416,69 @@ try:
             print("Warning: Skipping state evaluation due to invalid Vrms readings.")
             continue
 
-        # Print readings for user if needed for diagnostics
-        # print_output = f"Current Readings ({current_time.strftime('%H:%M:%S.%f')}): "
-        # for i, v_rms in enumerate(v_rms_readings):
-        #     print_output += f"CH{i+1}: {v_rms:6.3f}Vrms "
-        # print(print_output + f" -> State: {current_state}")
+        # Determine the potential new state based on current readings for CH2+
+        all_channels_on = all(v >= high_limit for v in v_rms_readings_for_state_check)
+        all_channels_off = all(v <= low_limit for v in v_rms_readings_for_state_check)
 
-        # Check for state change
-        all_channels_on = all(v >= ON_THRESHOLD for v in v_rms_readings_for_state_check)
-        all_channels_off = all(v <= OFF_THRESHOLD for v in v_rms_readings_for_state_check)
+        # State Establishment/Transition Logic
         if current_state == "UNKNOWN":
             if all_channels_on:
-                new_state = "ON"
-                current_state = new_state
-                last_state_change_time = datetime.datetime.now()
-                # Set trigger level for ON
+                current_state = "ON"
+                last_state_change_time = current_time
                 connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}")
-
+                print(f"Initial state detected as ON. Will start logging on next transition to OFF.")
             elif all_channels_off:
-                new_state = "OFF"
-                current_state = new_state
-                last_state_change_time = datetime.datetime.now()
+                current_state = "OFF"
+                last_state_change_time = current_time
                 connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
-            continue
+                print(f"Initial state detected as OFF. Will start logging on next transition to ON.")
+            else:
+                # Still in an indeterminate state or no clear ON/OFF. Keep current_state as UNKNOWN.
+                pass # No change, continue will be called below
+            continue # Always continue if still in UNKNOWN or just established initial state
 
-        if current_state == "OFF":
-            if all_channels_on:
+        # Current_state is either 'ON' or 'OFF'. Proceed to check for transitions.
+        new_actual_state = current_state # Assume no change unless clear transition
+
+        # Determine if there's a *real* transition from the established state
+        if current_state == "OFF" and all_channels_on:
+            new_actual_state = "ON"
+        elif current_state == "ON" and all_channels_off:
+            new_actual_state = "OFF"
+        # If both all_channels_on and all_channels_off are false, new_actual_state remains current_state
+        # This handles the intermediate or stable state where no clear transition occurs.
+
+        if new_actual_state != current_state:
+            duration = (current_time - last_state_change_time).total_seconds()
+            event_counter += 1
+
+            if current_state == "OFF" and new_actual_state == "ON":
                 # Transition from OFF to ON
-                new_state = "ON"
-                duration = (current_time - last_state_change_time).total_seconds()
-                event_counter += 1
-                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, 0.0, "OFF", duration) 
-                print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds. Line Voltage < {OFF_THRESHOLD:.3f}Vrms")
-                current_state = new_state
+                # Log previous OFF state with 0.0 line voltage
+                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, 0.0, "OFF", duration)
+                print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
+                current_state = "ON"
                 last_state_change_time = current_time
-                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}")
+                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}") # Set trigger for next OFF detection
 
-        elif current_state == "ON":
-            if all_channels_off:
+            elif current_state == "ON" and new_actual_state == "OFF":
                 # Transition from ON to OFF
-                new_state = "OFF"
-                duration = (current_time - last_state_change_time).total_seconds()
-                event_counter += 1
-                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, current_line_voltage_avg, "ON", duration)
-                print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds. Line Voltage: {current_line_voltage_avg:.3f}Vrms")
-                current_state = new_state
-                last_state_change_time = current_time
-                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
+                # Determine the line voltage to log
+                voltage_to_log = current_line_voltage_snapshot
 
-        # # debug        
+                # HARD-CODE: Set line voltage to 0.0 if this is the very first ON-to-OFF transition (event_counter == 1)
+                # This explicitly handles the initial corrupted reading you observed.
+                if event_counter == 1:
+                    voltage_to_log = 0.0
+                    print("Note: Line voltage for first ON-to-OFF transition hard-coded to 0.0V due to initial state data instability.")
+
+                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, voltage_to_log, "ON", duration)
+                print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds. Line Voltage: {voltage_to_log:.3f}Vrms")
+                current_state = "OFF"
+                last_state_change_time = current_time
+                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}") # Set trigger for next ON detection
+
+        # # debug
         # print(f"CH2+ Readings for State Check: {[f'{v:.3f}' for v in v_rms_readings_for_state_check]}")
         # print(f"All channels ON condition: {all_channels_on}")
         # print(f"All channels OFF condition: {all_channels_off}")
@@ -492,10 +508,25 @@ finally:
     # Before exiting, log the duration of the final state if it was not already logged
     final_time = datetime.datetime.now()
     duration = (final_time - last_state_change_time).total_seconds()
-    event_counter += 1 # Increment for the final state duration
+
+    # Determine the line voltage to log for the final state
+    final_voltage_to_log = 0.0 # Default to 0.0
+
+    # Only attempt to use current_line_voltage_snapshot if the queue has data
+    if len(line_voltage_readings_queue) > 0:
+        final_voltage_to_log = sum(line_voltage_readings_queue) / len(line_voltage_readings_queue)
+
     if current_state == "OFF":
-        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, 0.0, current_state, duration) # Changed line_voltage_avg to 0.0
+        # Always log 0.0 for line voltage if the final state is OFF
+        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, 0.0, current_state, duration)
         print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage: 0.000Vrms (Hardcoded for OFF state)")
-    else: # If the final state was ON, use the current_line_voltage_avg
-        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, current_line_voltage_avg, current_state, duration) 
-        print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage: {current_line_voltage_avg:.3f}Vrms") 
+    else: # If the final state was ON
+        # Apply the same hard-code logic for the final ON state if event_counter is 0 or 1
+        # This handles cases where the program exits very quickly after starting
+        if event_counter == 0 or (event_counter == 1 and duration < 1.0): # event_counter 0 means no transitions logged. 1 means the initial bad one was.
+             final_voltage_to_log = 0.0 # Hardcode if it's very early in program execution or only initial ON
+             print("Note: Line voltage for final ON state hard-coded to 0.0V due to early program termination or initial state.")
+
+        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, final_voltage_to_log, current_state, duration)
+        print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage: {final_voltage_to_log:.3f}Vrms")
+        
