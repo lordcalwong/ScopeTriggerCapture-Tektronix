@@ -26,7 +26,8 @@ from collections import deque  #only needed for running average on AC Line
 from openpyxl import Workbook
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
-MAX_VRMS = 50  # ~312 W arbitrary limit per audio CH  (except for AC Line, CH1)
+MAX_LINE_VOLTAGE_VRMS = 350.0  # AC Line RMS limit, arbitrary limit for CH1
+MAX_VRMS = 50  # ~312 W arbitrary limit for other audio CHs  (CH2+)
 ON_THRESHOLD = 9.0  #default trigger levels for 'ON' per audio CH
 OFF_THRESHOLD = 2.0 #default trigger levels for 'OFF' per audio CH
 LINE_VOLTAGE_WINDOW_SIZE = 4 # Define the window size for the running average
@@ -167,7 +168,7 @@ def setup_scope(scope_device, num_channels):
     Configures channels for the specified number of channels.
     Minimally tries to set scale and position.
     """
-    print("Ok. Setting up oscilloscope...", end='')
+    print("Ok. Setting up oscilloscope...  ")
 
     scope_device.write("*RST")  # Only needed for stubborn scopes
 
@@ -194,7 +195,7 @@ def setup_scope(scope_device, num_channels):
     scope_device.write("TRIGger:A:LEVel:CH1 50")
 
     print("Scope setup complete.")
-    print("Check and adjust scale, timing, and trigger is as needed.", end='')
+    print("Check and adjust scale, timing, and trigger is as needed. ")
 
     # # Wait for scope to finish setting up
     # scope_device.query("*OPC?")  # Issue with MSO
@@ -219,7 +220,7 @@ def make_datafile(timestamp, desktoppath: str = DESKTOP): # num_channels removed
 
             # Check if data file already exists
             if not os.path.exists(full_data_path):
-                print(f"Creating new data file: {full_data_path}")
+                print(f"Creating new data file at {user_path}.. .")
                 with open(full_data_path, "w") as datafile:
                     # UPDATED: Header for duration logging
                     header = "Event_Count, Start_Time_Absolute, End_Time_Absolute, Line Voltage, State, Duration_Seconds"
@@ -236,6 +237,12 @@ def apply_vrms_bounds(number: float) -> float:
     Applies upper and lower bounds to the Vrms readings 2nd CH+, not the AC line (CH 1).
     """
     return max(min(number, MAX_VRMS), 0)
+
+def apply_line_voltage_bounds(number: float) -> float:
+    """
+    Applies upper and lower bounds to the Vrms readings for the AC Line (CH1).
+    """
+    return max(min(number, MAX_LINE_VOLTAGE_VRMS), 0)
 
 def log_duration_to_file(save_directory, data_file_name, event_count, start_time, end_time, line_voltage_avg, state, duration_seconds):
     """
@@ -319,6 +326,7 @@ rm = None
 connected_instrument = None
 last_state_change_time = datetime.datetime.now()
 event_counter = 0
+first_transition_logged = False
 
 # Initialize deque for line voltage readings
 line_voltage_readings_queue = deque(maxlen=LINE_VOLTAGE_WINDOW_SIZE)
@@ -365,13 +373,13 @@ try:
     user_path = paths[0]
     datafile_name = paths[1]
     full_data_path = os.path.join(user_path, datafile_name)
-    print("Created file for data as ", datafile_name)
+    print("Created file for data as", datafile_name)
 
     # Notify user off and running
     print(f"Monitoring for ON (all channels > {high_limit:.2f} Vrms) and OFF (all channels < {low_limit:.2f} Vrms) states.")
+    no_response = input("Check Line voltage and amp out are OFF (0V) before begining. Hit Enter to continue...")
     print("Press 'q','esc', or 'Crtl-C' to stop the program at any time.")
-    print("Starting monitoring...")
-
+    print("Start monitoring...")
 
     # Main loop
     while not stop_program_event.is_set():
@@ -392,6 +400,7 @@ try:
             try:
                 v_rms = float(connected_instrument.query(f"MEASUrement:MEAS{i}:VALue?"))
                 if i == 1: # This is the AC Line (CH1)
+                    v_rms = apply_line_voltage_bounds(v_rms)
                     line_voltage_readings_queue.append(v_rms)
                     if len(line_voltage_readings_queue) > 0:
                         current_line_voltage_snapshot = sum(line_voltage_readings_queue) / len(line_voltage_readings_queue)
@@ -449,40 +458,51 @@ try:
         # This handles the intermediate or stable state where no clear transition occurs.
 
         if new_actual_state != current_state:
-            duration = (current_time - last_state_change_time).total_seconds()
-            event_counter += 1
-
-            if current_state == "OFF" and new_actual_state == "ON":
-                # Transition from OFF to ON
-                # Log previous OFF state with 0.0 line voltage
-                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, 0.0, "OFF", duration)
-                print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
-                current_state = "ON"
+            if not first_transition_logged:
+                # This is the very first transition detected. Don't log the initial state.
+                print(f"State captured. Waiting for first transition to ON.")
+                current_state = new_actual_state
                 last_state_change_time = current_time
-                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}") # Set trigger for next OFF detection
+                first_transition_logged = True
+                # Set the trigger level for the next transition
+                if current_state == "ON":
+                    connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}")
+                else:
+                    connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
+            else: 
+                # This is a subsequent transition; start logging from this point
+                duration = (current_time - last_state_change_time).total_seconds()
+                event_counter += 1
+                if current_state == "OFF" and new_actual_state == "ON":
+                    # Transition from OFF to ON
+                    # Log previous OFF state with 0.0 line voltage
+                    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, 0.0, "OFF", duration)
+                    print(f"State Change: OFF to ON. Previous OFF duration: {duration:.3f} seconds.")
+                    current_state = "ON"
+                    last_state_change_time = current_time
+                    connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}") # Set trigger for next OFF detection
 
-            elif current_state == "ON" and new_actual_state == "OFF":
-                # Transition from ON to OFF
-                # Determine the line voltage to log
-                voltage_to_log = current_line_voltage_snapshot
+                elif current_state == "ON" and new_actual_state == "OFF":
+                    # Transition from ON to OFF
+                    # Determine the line voltage to log
+                    voltage_to_log = current_line_voltage_snapshot
 
-                # HARD-CODE: Set line voltage to 0.0 if this is the very first ON-to-OFF transition (event_counter == 1)
-                # This explicitly handles the initial corrupted reading you observed.
-                if event_counter == 1:
-                    voltage_to_log = 0.0
-                    print("Note: Line voltage for first ON-to-OFF transition hard-coded to 0.0V due to initial state data instability.")
+                    # HARD-CODE: Set line voltage to 0.0 if this is the very first ON-to-OFF transition (event_counter == 1)
+                    # This explicitly handles the initial corrupted reading you observed.
+                    if event_counter == 1:
+                        voltage_to_log = 0.0
 
-                log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, voltage_to_log, "ON", duration)
-                print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds. Line Voltage: {voltage_to_log:.3f}Vrms")
-                current_state = "OFF"
-                last_state_change_time = current_time
-                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}") # Set trigger for next ON detection
+                    log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, current_time, voltage_to_log, "ON", duration)
+                    print(f"State Change: ON to OFF. Previous ON duration: {duration:.3f} seconds. Line Voltage: {voltage_to_log:.3f}Vrms")
+                    current_state = "OFF"
+                    last_state_change_time = current_time
+                    connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}") # Set trigger for next ON detection
 
-        # # debug
-        # print(f"CH2+ Readings for State Check: {[f'{v:.3f}' for v in v_rms_readings_for_state_check]}")
-        # print(f"All channels ON condition: {all_channels_on}")
-        # print(f"All channels OFF condition: {all_channels_off}")
-        # print(f"Current State: {current_state}")
+            # # debug
+            # print(f"CH2+ Readings for State Check: {[f'{v:.3f}' for v in v_rms_readings_for_state_check]}")
+            # print(f"All channels ON condition: {all_channels_on}")
+            # print(f"All channels OFF condition: {all_channels_off}")
+            # print(f"Current State: {current_state}")
 
 except KeyboardInterrupt:
     print("\nProgram terminated by user (Ctrl+C).")
