@@ -201,7 +201,7 @@ def setup_scope(scope_device, num_channels):
     # scope_device.query("*OPC?")  # Issue with MSO
     time.sleep(0.2)
 
-def make_datafile(timestamp, desktoppath: str = DESKTOP): # num_channels removed as it's not needed for header anymore
+def make_datafile(timestamp, desktop_path: str = DESKTOP): # num_channels removed as it's not needed for header anymore
     """Generates a data file for the data based on start date and time.
     Includes headers for each monitored channel. Asks user for directory
     or defaults to desktop.
@@ -209,9 +209,9 @@ def make_datafile(timestamp, desktoppath: str = DESKTOP): # num_channels removed
     """
     while True:
         try:
-            user_path_input = input(f"Enter path for data or 'd' for default ({desktoppath}): ").strip()
+            user_path_input = input(f"Enter path for data or 'd' for default ({desktop_path}): ").strip()
             if user_path_input.lower() == 'd':
-                user_path = desktoppath
+                user_path = desktop_path
             else:
                 user_path = user_path_input
 
