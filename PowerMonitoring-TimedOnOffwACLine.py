@@ -1,7 +1,7 @@
 # Power Monitoring- Triggered
 #
 # Continuously monitor AC Line (CH1) and Amplifier output channels (CH2+) 
-# to log ON/OFF times (with better than 1 second resolution).
+# to log ON/OFF times (<1 sec resolution).
 #
 # Scope is a Rigol or Tektronix scope in autorun trigger mode.
 # 
@@ -27,7 +27,7 @@ from collections import deque  #only needed for running average on AC Line
 
 from openpyxl import Workbook
 
-DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
+DEFAULT_IP_ADDRESS = '169.254.131.118'  #192.168.1.53, 10.101.100.151, 169.254.131.118
 MAX_LINE_VOLTAGE_VRMS = 350.0  # AC Line RMS limit, arbitrary limit for CH1
 MAX_VRMS = 50  # ~312 W arbitrary limit for other audio CHs  (CH2+)
 ON_THRESHOLD = 9.0  #default trigger levels for 'ON' per audio CH
@@ -231,7 +231,7 @@ def setup_scope(scope_device, num_channels):
         return
 
     print("Scope setup complete.")
-    print("Check and adjust scale, timing, and trigger is as needed. ")
+    print("Re-check and adjust scale, timing, and trigger as needed. ")
 
     # # Wait for scope to finish setting up
     # scope_device.query("*OPC?")  # Issue with MSO
