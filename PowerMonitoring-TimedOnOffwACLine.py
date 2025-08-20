@@ -6,15 +6,19 @@
 # Scope is a Rigol or Tektronix scope in autorun trigger mode.
 # 
 # User must input IP address and number of channels to monitor (1-8), 
-# the and desired ON or OFF state voltage (~power levels) thresholds.
-# User is also given the option to auto setup scope on contiguous channels
-# or to leave it alone as user perfers.
+# the and desired ON or OFF voltage (~power levels) thresholds.
+# For a valid ON or OFF state, all amplifier channels must be above or
+# below the threshold, respectively.
+#
+# User is given the option to automatically set up the scope on contiguous
+# channels or to leave it alone. User must set up line on first channel
+# and amplifier channels on subsequent channels with appropriate scale,
+# positions, and trigger levels.
+# 
 # Data is saved to csv file at the user directed path or defaults to the 
 # desktop.
 #
-# The code assumes system looks for and starts in an "OFF" to "ON" state.
-#  
-# Author: C. Wong 20250818
+# Author: C. Wong 20250819
 
 import time
 import datetime
@@ -24,7 +28,6 @@ import threading
 import csv
 import keyboard
 from collections import deque  #only needed for running average on AC Line
-
 from openpyxl import Workbook
 
 DEFAULT_IP_ADDRESS = '169.254.131.118'  #192.168.1.53, 10.101.100.151, 169.254.131.118
@@ -203,7 +206,6 @@ def setup_scope(scope_device, num_channels):
         scope_device.write("TRIGger:A:EDGE:COUPling DC")
         scope_device.write("TRIGger:A:EDGE:SLOpe RISE")
         scope_device.write("TRIGger:A:LEVel:CH1 50")
-
     elif is_rigol:
         print("Rigol scope detected. Using Rigol-specific commands.")
 
@@ -225,10 +227,9 @@ def setup_scope(scope_device, num_channels):
         scope_device.write(":TRIGger:EDGe:COUPling DC")
         scope_device.write(":TRIGger:EDGe:SLOpe POSitive")
         scope_device.write(":TRIGger:EDGe:LEVel 50")
-
     else:
         print("Unsupported oscilloscope model. Please use a Rigol or Tektronix scope.")
-        return
+        stop_program_event.set()
 
     print("Scope setup complete.")
     print("Re-check and adjust scale, timing, and trigger as needed. ")
@@ -411,9 +412,9 @@ try:
     full_data_path = os.path.join(user_path, datafile_name)
     print("Created file for data as", datafile_name)
 
-    # Notify user off and running
+    # Notify user program is off and running
     print(f"Monitoring for ON (all channels > {high_limit:.2f} Vrms) and OFF (all channels < {low_limit:.2f} Vrms) states.")
-    no_response = input("Check Line voltage and amp out are OFF (0V) before begining. Hit Enter to continue...")
+    no_response = input("Check Line voltage and amp outputs are OFF (0V) before begining. Hit Enter to continue...")
     print("Press 'q','esc', or 'Crtl-C' to stop the program at any time.")
     print("Start monitoring...")
 
@@ -429,17 +430,20 @@ try:
         # Start acquisition based on instrument type
         if is_rigol:
             connected_instrument.write(":RUN")
-        else: # Assumes Tektronix or a similar scope
+        elif is_tek: # Assumes Tektronix or a similar scope
             connected_instrument.write("ACQuire:STATE ON")
+        else:
+            print("Unsupported oscilloscope model. Please use a Rigol or Tektronix scope.")
+            stop_program_event.set()
 
         # Read measurements
         current_time = datetime.datetime.now()
         v_rms_readings = []
 
-        # Initialize current_line_voltage_snapshot for this loop iteration
-        # This will be updated if line_voltage_readings_queue is populated.
-        current_line_voltage_snapshot = 0.0 # Initialize to 0.0 before reading CH1
+        # Initialize for loop iteration to get an average or snapshot of the line voltage.
+        current_line_voltage_snapshot = 0.0
 
+        # Read RMS values for each channel
         for i in range(1, num_channels_to_monitor + 1):
             try:
                 # Get measurements
@@ -468,7 +472,7 @@ try:
                 v_rms_readings.append(float('NAN'))
 
         # Create a new list for checks, excluding channel 1
-        v_rms_readings_for_state_check = v_rms_readings[1:] # Slice from the second element to the end
+        v_rms_readings_for_state_check = v_rms_readings[1:] # Slice from the 2nd element to end
 
         # Check if any readings are NaN, if so, we can't determine state reliably
         if any(v == float('NAN') for v in v_rms_readings):
@@ -504,9 +508,8 @@ try:
             new_actual_state = "ON"
         elif current_state == "ON" and all_channels_off:
             new_actual_state = "OFF"
-        # If both all_channels_on and all_channels_off are false, new_actual_state remains current_state
-        # This handles the intermediate or stable state where no clear transition occurs.
 
+        # This handles the intermediate or stable state where no clear transition occurs.
         if new_actual_state != current_state:
             if not first_transition_logged:
                 # This is the very first transition detected. Don't log the initial state.
@@ -518,13 +521,19 @@ try:
                 if current_state == "ON":       # State is ON, set low limit
                     if is_rigol:
                         connected_instrument.write(f":TRIGger:EDGe:LEVel {low_limit}")
-                    else:
+                    elif is_tek:
                         connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}")
+                    else:
+                        print("Unsupported oscilloscope model. Please use a Rigol or Tektronix scope.")
+                        stop_program_event.set()
                 else:                           # State is OFF, set high limit
                     if is_rigol:
                         connected_instrument.write(f":TRIGger:EDGe:LEVel {high_limit}")
-                    else:
+                    elif is_tek:
                         connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
+                    else:
+                        print("Unsupported oscilloscope model. Please use a Rigol or Tektronix scope.")
+                        stop_program_event.set()
             else: 
                 # This is a subsequent transition; start logging from this pointon
                 duration = (current_time - last_state_change_time).total_seconds()
@@ -562,11 +571,16 @@ try:
                     else:
                         connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}") 
 
-            # Only needed for debug
+            # *********  Only needed for debug  ***********
             # print(f"CH2+ Readings for State Check: {[f'{v:.3f}' for v in v_rms_readings_for_state_check]}")
             # print(f"All channels ON condition: {all_channels_on}")
             # print(f"All channels OFF condition: {all_channels_off}")
             # print(f"Current State: {current_state}")
+
+        # At this point, both all_channels_on and all_channels_off are false
+        # No change in state, just loop around and continue to monitor
+        # new_actual_state = current_state
+
 
 except KeyboardInterrupt:
     print("\nProgram terminated by user (Ctrl+C).")
@@ -575,8 +589,15 @@ except Exception as e:
 finally:
     # Always close the instrument connection and resource manager
     if 'connected_instrument' in locals() and connected_instrument:
+        # Stop acquisition before closing
         try:
-            connected_instrument.write("ACQuire:STATE OFF") # Stop acquisition before closing
+            if is_rigol:
+                connected_instrument.write(":STOP")
+            elif is_tek:
+                connected_instrument.write("ACQuire:STATE OFF") 
+            else:
+                print("Unsupported oscilloscope model. Please use a Rigol or Tektronix scope.")
+                stop_program_event.set()
             connected_instrument.write("CLEAR") # Ensure scope acquisition is stopped
             connected_instrument.close()
             print("Instrument connection closed.")
@@ -590,11 +611,12 @@ finally:
             print(f"Error closing Resource Manager: {e}")
 
     # Before exiting, log the duration of the final state if it was not already logged
+    event_counter += 1
     final_time = datetime.datetime.now()
     duration = (final_time - last_state_change_time).total_seconds()
 
     # Determine the line voltage to log for the final state
-    final_voltage_to_log = 0.0 # Default to 0.0
+    final_voltage_to_log = 0.000999 # Default to 0.0
 
     # Only attempt to use current_line_voltage_snapshot if the queue has data
     if len(line_voltage_readings_queue) > 0:
@@ -602,15 +624,14 @@ finally:
 
     if current_state == "OFF":
         # Always log 0.0 for line voltage if the final state is OFF
-        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, 0.0, current_state, duration)
-        print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage: 0.000Vrms (Hardcoded for OFF state)")
+        log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, final_voltage_to_log, current_state, duration)
+        print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage hardcoded for OFF state.)")
     else: # If the final state was ON
         # Apply the same hard-code logic for the final ON state if event_counter is 0 or 1
         # This handles cases where the program exits very quickly after starting
-        if event_counter == 0 or (event_counter == 1 and duration < 1.0): # event_counter 0 means no transitions logged. 1 means the initial bad one was.
-             final_voltage_to_log = 0.0 # Hardcode if it's very early in program execution or only initial ON
-             print("Note: Line voltage for final ON state hard-coded to 0.0V due to early program termination or initial state.")
-
+        if event_counter == 0 or (event_counter == 1 and duration < 1.0): # event_counter 0 means no transitions logged. 1 means the initial state captured.
+             final_voltage_to_log = 0.0 # Hardcode as too  early in program for accurate readings
+             print("Note: Line voltage set 0.0V due to early program termination or initial state.")
         log_duration_to_file(user_path, datafile_name, event_counter, last_state_change_time, final_time, final_voltage_to_log, current_state, duration)
         print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage: {final_voltage_to_log:.3f}Vrms")
         
