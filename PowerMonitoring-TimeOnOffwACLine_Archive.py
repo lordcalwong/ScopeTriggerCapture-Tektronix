@@ -27,12 +27,12 @@ import pyvisa
 import threading
 import csv
 import keyboard
-from collections import deque  #only needed for running average on AC Line
+from collections import deque   # only needed for running average on AC Line
 from openpyxl import Workbook
 
 DEFAULT_IP_ADDRESS = '169.254.131.118'  #192.168.1.53, 10.101.100.151, 169.254.131.118
 MAX_LINE_VOLTAGE_VRMS = 350.0  # AC Line RMS limit, arbitrary limit for CH1
-MAX_VRMS = 50  # ~312 W arbitrary limit for other audio CHs  (CH2+)
+MAX_VRMS = 50  # ~312 W arbitrary limit for other audio CHs (CH2+)
 ON_THRESHOLD = 9.0  #default trigger levels for 'ON' per audio CH
 OFF_THRESHOLD = 2.0 #default trigger levels for 'OFF' per audio CH
 LINE_VOLTAGE_WINDOW_SIZE = 4 # Define the window size for the running average
@@ -131,21 +131,20 @@ def get_num_channels():
 
 def get_thresholds(default_on_trig: float = ON_THRESHOLD, default_off_trig: float = OFF_THRESHOLD):
     """
-    Prompts the user for ON and OFF threshold levels for Vrms,
-    validating the inputs.
+    Prompts the user for ON and OFF threshold levels for Vrms trigger
     """
     on_trig_level = default_on_trig
     off_trig_level = default_off_trig
 
     while True:
         try:
-            on_trig_input = input(f"Enter trigger level for ON cycle (default: {on_trig_level:.2f}V, 'd' for default): ").strip()
+            on_trig_input = input(f"Enter CH1 trigger level for line voltage ON  (default: {on_trig_level:.2f}V, 'd' for default): ").strip()
             if on_trig_input.lower() == 'd':
                 on_trig_level = default_on_trig
             else:
                 on_trig_level = float(on_trig_input)
 
-            off_trig_input = input(f"Enter trigger level for OFF cycle (default: {off_trig_level:.2f}V, 'd' for default): ").strip()
+            off_trig_input = input(f"Enter CH1 trigger level for line voltage OFF (default: {off_trig_level:.2f}V, 'd' for default): ").strip()
             if off_trig_input.lower() == 'd':
                 off_trig_level = default_off_trig
             else:
@@ -269,17 +268,17 @@ def make_datafile(timestamp, desktop_path: str = DESKTOP): # num_channels remove
         except ValueError:
             print("Invalid path. Please enter a valid path.")
 
-def apply_vrms_bounds(number: float) -> float:
-    """
-    Applies upper and lower bounds to the Vrms readings 2nd CH+, not the AC line (CH 1).
-    """
-    return max(min(number, MAX_VRMS), 0)
-
 def apply_line_voltage_bounds(number: float) -> float:
     """
     Applies upper and lower bounds to the Vrms readings for the AC Line (CH1).
     """
     return max(min(number, MAX_LINE_VOLTAGE_VRMS), 0)
+
+def apply_vrms_bounds(number: float) -> float:
+    """
+    Applies upper and lower bounds to the Vrms readings 2nd CH+  [WARNING - NOT the AC line CH 1]
+    """
+    return max(min(number, MAX_VRMS), 0)
 
 def log_duration_to_file(save_directory, data_file_name, event_count, start_time, end_time, line_voltage_avg, state, duration_seconds):
     """

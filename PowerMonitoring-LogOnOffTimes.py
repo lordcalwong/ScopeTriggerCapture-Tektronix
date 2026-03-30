@@ -1,14 +1,15 @@
-# Power Monitoring- Triggered
+# Power Monitoring- LogOnOffTimes.py
 #
 # Continuously monitor AC Line (CH1) and Amplifier output channels (CH2+) 
-# to log ON/OFF times (<1 sec resolution).
+# to log ON/OFF times (<1 sec resolution) based on CH1 trigger level.
 #
-# Scope is a Rigol or Tektronix scope in autorun trigger mode.
+# Scope is a Rigol, Tektronix, or LeCroy scope in autorun trigger mode.
 # 
-# User must input IP address and number of channels to monitor (1-8), 
-# the and desired ON or OFF voltage (~power levels) thresholds.
-# For a valid ON or OFF state, all amplifier channels must be above or
-# below the threshold, respectively.
+# User must input IP address and number of output load channels to monitor (1-7).
+# Maximum is total phyiscal channesls (8).  Minimum is two with at least one output (CH2). 
+# 
+# If the line voltage is present for longer then 10 seconds, 
+# all amplifier channels must be above threshold or an error is reported.
 #
 # User is given the option to automatically set up the scope on contiguous
 # channels or to leave it alone. User must set up line on first channel
@@ -18,7 +19,7 @@
 # Data is saved to csv file at the user directed path or defaults to the 
 # desktop.
 #
-# Author: C. Wong 20250819
+# Author: C. Wong 2026XXXX
 
 import time
 import datetime
@@ -30,11 +31,10 @@ import keyboard
 from collections import deque  #only needed for running average on AC Line
 from openpyxl import Workbook
 
-DEFAULT_IP_ADDRESS = '169.254.131.118'  #192.168.1.53, 10.101.100.151, 169.254.131.118
+DEFAULT_IP_ADDRESS = '192.168.1.90'  # 10.101.100.151, 169.254.131.118, 10.100.52.231
+DEFAULT_NO_CHANNELS = 4  # Maximum number of channels on scope
 MAX_LINE_VOLTAGE_VRMS = 350.0  # AC Line RMS limit, arbitrary limit for CH1
-MAX_VRMS = 50  # ~312 W arbitrary limit for other audio CHs  (CH2+)
-ON_THRESHOLD = 9.0  #default trigger levels for 'ON' per audio CH
-OFF_THRESHOLD = 2.0 #default trigger levels for 'OFF' per audio CH
+MAX_VRMS = 50.0  # ~312 W arbitrary limit for other audio CHs  (CH2+)
 LINE_VOLTAGE_WINDOW_SIZE = 4 # Define the window size for the running average
 
 # Find user desktop one level down from home [~/* /Desktop] as optional path
@@ -66,177 +66,275 @@ def on_esc_press():
 def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: str = DEFAULT_IP_ADDRESS):
     """
     Prompts the user for an IP address and attempts to establish a connection
-    to a PyVISA instrument, retrying until successful.
+    to a PyVISA instrument and returns the object plus its identity.
 
     Args:
         resource_manager: The PyVISA ResourceManager instance.
         default_ip: The default IP address to suggest to the user.
 
     Returns:
-        The connected PyVISA instrument object.
+        The connected PyVISA instrument object and label.
     """
-    my_instrument = None
-    while my_instrument is None:
-        ip_address_input = input(
-            f"Enter the instrument's IP address or 'd' for default ({default_ip}): "
-        ).strip()
-        if ip_address_input.lower() == 'd':
+    while True:
+        user_input = input(f"Enter IP address, 'q' to quit, 'd' for default (Default {default_ip}): ").strip()
+        
+        if user_input.lower() == 'q':
+            return None, None
+        
+        # Use default if input is 'd' or empty
+        if user_input.lower() == 'd' or not user_input:
             visa_address = default_ip
         else:
-            visa_address = ip_address_input
+            visa_address = user_input
 
-        # Construct the full VISA resource string
-        resource_string = f'TCPIP::{visa_address}::INSTR'
+        # Smart string construction
+        if "::" in visa_address:
+            resource_string = visa_address
+        else:
+            resource_string = f'TCPIP::{visa_address}::INSTR'
 
-        print(f"Attempting to connect to: {resource_string}")
+        print(f"Attempting connection to: {resource_string}...")
 
         try:
-            # Attempt to open the resource
-            my_instrument = resource_manager.open_resource(resource_string)
+            instr = resource_manager.open_resource(resource_string)
+            instr.timeout = 3000 
+            idn = instr.query('*IDN?').strip().upper()
+            
+            # Create a label/metadata tag
+            label = "unknown"
+            if "RIGOL" in idn: label = "rigol"
+            elif "TEKTRONIX" in idn: label = "tek"
+            elif "LECROY" in idn: label = "lecroy"
+            else: label = "other"
 
-            # Try to query the instrument to verify connection
-            print(f"Successfully connected! Instrument ID: {my_instrument.query('*IDN?').strip()}")
+            print(f"Connected! Identity: {idn}")
+            return instr, label
 
-        except pyvisa.errors.VisaIOError as e:
-            print(f"Connection failed: {e}")
-            print("Please ensure the IP address is correct and the instrument is on and connected to the network.")
-            print("Retrying in 2 seconds...")
-            my_instrument = None   # Ensure my_instrument is None to continue the loop
-            time.sleep(2)   # Wait before retrying
+        except (pyvisa.errors.VisaIOError, Exception) as e:
+            print(f"Error: {e}")
+            # Ensure we don't leave a half-open connection
+            if 'instr' in locals():
+                try:
+                    instr.close()
+                except:
+                    pass
+            print("Retrying... (Press 'q' to stop)")
+            time.sleep(1)
 
-        except Exception as e:
-            print(f"An unexpected error occurred: {e}")
-            print("Retrying in 2 seconds...")
-            my_instrument = None
-            time.sleep(2)
-
-    return my_instrument
-
-def get_num_channels():
+def get_max_channels():
     """
-    Asks the user to input the number of channels (2-8).
-    First channel monitors AC Line. Additional channels monitor
+    Asks the user to input the physical maximum number of channels (2-8) on scope.
+    'd' or Enter returns the default of 4.
+    """
+    user_input = input("Enter the physical maximum number of channels (2-8) or 'd' (Default = 4): ").strip().lower()
+
+    # 1. Handle the explicit default cases
+    if user_input == 'd' or user_input == '':
+        return 4
+
+    # 2. Try to process as an integer
+    try:
+        max_channels = int(user_input)
+        
+        # Check if it's within your specific 2-8 range
+        if 2 <= max_channels <= 8:
+            return max_channels
+        else:
+            print(f"Value {max_channels} is out of range. Using default (4).")
+            return 4
+            
+    except ValueError:
+        print("Invalid input format. Using default (4).")
+        return 4
+
+def get_num_channels(max_channels):
+    """
+    Asks the user to input the number of load channels to monitor (2-8).
+    Note- First channel (CH1) monitors AC Line. Additional channels (CH2+) monitor
     amplifier outputs (CH2+).
     """
-    print("First channel monitors AC Line. Additional channels (CH2+) monitor amplifier outputs.")
+    print("First channel monitors AC Line. Additional channels monitor amplifier outputs.")
     while True:
         try:
-            num_channels = int(input("Including AC Line (CH1), enter no. of CHs (2-8): "))
-            if 2 <= num_channels <= 8:
+            num_channels = int(input(f"Including AC Line (CH1), enter total number of CHs (Enter 2-{max_channels}): "))
+            if 2 <= num_channels <= max_channels:
                 return num_channels
             else:
-                print("Invalid input. Please enter a number between 2 and 8.")
+                print(f"Invalid input. Please enter a number between 2 and {max_channels}.")
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-def get_thresholds(default_on_trig: float = ON_THRESHOLD, default_off_trig: float = OFF_THRESHOLD):
+def get_thresholds(default_on_value, default_off_value, max_limit=300, min_limit=0):
     """
-    Prompts the user for ON and OFF threshold levels for Vrms,
-    validating the inputs.
+    Prompts user for ON/OFF Vrms thresholds with dynamic limits and defaults.
     """
-    on_trig_level = default_on_trig
-    off_trig_level = default_off_trig
+    # DEVELOPER SANITY CHECK:
+    # Ensures the programmer didn't pass defaults that violate the limits.
+    if not (min_limit <= default_off_value < default_on_value <= max_limit):
+        print(f"DEBUG WARNING: Defaults ({default_on_value}, {default_off_value}) "
+              f"are outside limits ({min_limit}, {max_limit})!")
 
     while True:
         try:
-            on_trig_input = input(f"Enter trigger level for ON cycle (default: {on_trig_level:.2f}V, 'd' for default): ").strip()
-            if on_trig_input.lower() == 'd':
-                on_trig_level = default_on_trig
-            else:
-                on_trig_level = float(on_trig_input)
+            # ON Threshold Prompt
+            on_prompt = (f"Enter ON rms level (Default: {default_on_value:.2f}V, "
+                         f"Min: {min_limit}V, Max: {max_limit}V, 'd' for default): ")
+            user_on_input = input(on_prompt).strip().lower()
+            
+            on_rms_level = default_on_value if user_on_input == 'd' else float(user_on_input)
 
-            off_trig_input = input(f"Enter trigger level for OFF cycle (default: {off_trig_level:.2f}V, 'd' for default): ").strip()
-            if off_trig_input.lower() == 'd':
-                off_trig_level = default_off_trig
-            else:
-                off_trig_level = float(off_trig_input)
+            # OFF Threshold Prompt (Added min_limit here for UI consistency)
+            off_prompt = (f"Enter OFF rms level (Default: {default_off_value:.2f}V, "
+                          f"Min: {min_limit}V, 'd' for default): ")
+            user_off_input = input(off_prompt).strip().lower()
+            
+            off_rms_level = default_off_value if user_off_input == 'd' else float(user_off_input)
 
-            # Validate the thresholds
-            if on_trig_level <= 0:
-                print("Error: ON threshold must be greater than 0.")
-            elif off_trig_level <= 0:
-                print("Error: OFF threshold must be greater than 0.")
-            elif on_trig_level >= MAX_VRMS:
-                print(f"Error: ON threshold must be less than {MAX_VRMS}V.")
-            elif off_trig_level >= on_trig_level:
-                print("Error: OFF threshold must be less than the ON threshold.")
+            # --- VALIDATION LOGIC ---
+            if on_rms_level < min_limit:
+                print(f"Error: ON threshold cannot be below {min_limit}V.")
+            elif on_rms_level > max_limit:
+                print(f"Error: ON threshold cannot exceed {max_limit}V.")
+            elif off_rms_level < min_limit:
+                print(f"Error: OFF threshold cannot be below {min_limit}V.")
+            elif off_rms_level >= on_rms_level:
+                print(f"Error: OFF threshold must be less than the ON threshold (OFF < ON).")
             else:
-                return on_trig_level, off_trig_level # Valid inputs, exit loop
+                return on_rms_level, off_rms_level
 
         except ValueError:
-            print("Invalid input. Please enter a numerical value or 'd' for default.")
-        except Exception as e:
-            print(f"An unexpected error occurred: {e}")
+            print("Invalid input. Please enter a numerical value or 'd'.")
 
-def setup_scope(scope_device, num_channels):
+def setup_scope(scope, num_channels, max_channels, brand):
     """
     Configures channels for the specified number of channels, setting
-    scale and position, and adapting to either a Tektronix or a Rigol scope.
+    scale and position, and adapting to brand- rigol, tek, lecroy, other.
     """
-    print("Ok. Setting up oscilloscope...  ")
-
-    # Query instrument identity to determine the manufacturer
-    idn_string = scope_device.query('*IDN?').strip()
-    is_rigol = "RIGOL" in idn_string.upper()
-    is_tek = "TEKTRONIX" in idn_string.upper()
-
-    if is_tek:
-        print("Tektronix scope detected. Using Tek-specific commands.")
-
-        scope_device.write("*RST")  # Only needed for stubborn scopes
-
+    # DEVELOPER SANITY CHECK:
+    # Ensure programmer brand is valid
+    if brand.lower() not in ["rigol", "tek", "lecroy", "other"]:
+        print(f"DEBUG WARNING: Invalid brand specified ({brand}). Please use 'rigol', 'tek', 'lecroy', or 'other'.")
+        stop_program_event.set()
+        return
+    
+    reset_request = input("Would you like a scope reset? (Y/N)? ").strip().lower()
+    if reset_request == 'y':
+        scope.write("*RST")
+        print("Scope reset command sent. Please wait for the scope to reset before proceeding.")
+        time.sleep(5)  # Wait for the scope to reset. Adjust as needed based on scope response time.
+        scope.write("*CLS")
+        time.sleep(5)
+        
+    if brand.lower() == "tek":
+        print("Setting up Tektronix scope...")
         # Set up vertical
         for i in range(1, num_channels + 1):
-            scope_device.write(f"SELect:CH{i} ON")
-            scope_device.write(f"CH{i}:POSition 0")
+            scope.write(f"SELect:CH{i} ON")
+            scope.write(f"CH{i}:POSition 0")
             if i == 1:
-                scope_device.write(f"CH{1}:SCALe 100")
+                scope.write(f"CH{1}:SCALe 100")
             else:
-                scope_device.write(f"CH{i}:SCALe 10")
-            scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")   # Need separate STATE 1 command for DPO
-            scope_device.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")  # Need separate TYPE command for MSO
-            # scope_device.write(f"DISplay:SPECView1:VIEWStyle OVERly")   # Not working on MSO
+                scope.write(f"CH{i}:SCALe 10")
+            scope.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")   # Need separate STATE 1 command for DPO
+            scope.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")  # Need separate TYPE command for MSO
+            # scope.write(f"DISplay:SPECView1:VIEWStyle OVERly")   # Not working on MSO
 
         # Set up timebase
-        scope_device.write("HORizontal:SCAle 200E-6")
-        scope_device.write("HORizontal:POSition 50")
+        scope.write("HORizontal:SCAle 200E-6")
+        scope.write("HORizontal:POSition 50")
 
         # Set up trigger to line
-        scope_device.write("TRIGger:A:EDGE:SOUrce CH1")
-        scope_device.write("TRIGger:A:EDGE:COUPling DC")
-        scope_device.write("TRIGger:A:EDGE:SLOpe RISE")
-        scope_device.write("TRIGger:A:LEVel:CH1 50")
-    elif is_rigol:
-        print("Rigol scope detected. Using Rigol-specific commands.")
+        scope.write("TRIGger:A:EDGE:SOUrce CH1")
+        scope.write("TRIGger:A:EDGE:COUPling DC")
+        scope.write("TRIGger:A:EDGE:SLOpe RISE")
+        scope.write("TRIGger:A:LEVel:CH1 50")
 
+    elif  brand.lower() == "rigol":
+         # Hide all channels and measurements
+        for i in range(1, max_channels + 1):
+            scope.write(f":CHANnel{i}:DISPlay OFF") 
+
+         # Vertical configure
         for i in range(1, num_channels + 1):
-            scope_device.write(f":CHANnel{i}:DISPlay ON")
-            scope_device.write(f":CHANnel{i}:OFFSet 0")
             if i == 1:
-                scope_device.write(f":CHANnel{1}:SCALe 100")
+                scope.write(f":CHANnel{1}:SCALe 100")
             else:
-                scope_device.write(f":CHANnel{i}:SCALe 10")
-        
-        # Set up timebase
-        scope_device.write(":TIMebase:SCALe 200e-6")
-        scope_device.write(":TIMebase:DELay 50")
-        
-        # Set up trigger to line
-        scope_device.write(":TRIGger:MODE EDGE")
-        scope_device.write(":TRIGger:EDGe:SOUrce CHAN1")
-        scope_device.write(":TRIGger:EDGe:COUPling DC")
-        scope_device.write(":TRIGger:EDGe:SLOpe POSitive")
-        scope_device.write(":TRIGger:EDGe:LEVel 50")
-    else:
-        print("Unsupported oscilloscope model. Please use a Rigol or Tektronix scope.")
-        stop_program_event.set()
+                scope.write(f":CHANnel{i}:SCALe 10")
+            scope.write(f":CHANnel{i}:DISPlay ON")
+            scope.write(f":CHANnel{i}:PROBe 10")
+            scope.write(f":CHANnel{i}:OFFSet 0")
+            scope.write(f":CHANnel{i}:BWLimit 20M")
+            scope.write(f":CHANnel{i}:COUPling DC")
+            scope.write(f":CHANnel{i}:INVert OFF")
+            scope.write(f":CHANnel{i}:UNITs VOLT")
 
-    print("Scope setup complete.")
-    print("Re-check and adjust scale, timing, and trigger as needed. ")
+        # Horizontal configure
+        scope.write(":TIMebase:SCALe 200e-6")
+        scope.write(":TIMebase:DELay 50")
+        
+        # Trigger configure to line
+        scope.write(":TRIGger:MODE EDGE")
+        scope.write(":TRIGger:EDGe:SOUrce CHAN1")
+        scope.write(":TRIGger:EDGe:COUPling DC")
+        scope.write(":TRIGger:EDGe:SLOpe POSitive")
+        scope.write(":TRIGger:EDGe:LEVel 50")
+
+    elif brand.lower() == "lecroy":
+        # LeCroy scopes can be quite different. 
+        # May need adjustment based on the specific model and firmware.
+        # Using Visual Basic Scripting (VBS) commands instead of SCPI.
+        print("Set to TCPIP (VXI-11) on scope.  Setting up LeCroy scope...")
+        
+        # Hide all channels and measurements
+        scope.write("VBS 'app.Measure.ClearAll'")
+        scope.write("VBS 'app.Measure.ShowMeasure = True'")
+        for i in range(1, max_channels + 1):
+            scope.write(f"VBS 'app.Acquisition.C{i}.View = False'") 
+
+        # Vertical- Configure active channels
+        for i in range(1, num_channels + 1):
+            # label and scale for first channel (AC line) differently
+            label = "AC Power Line" if i == 1 else f"Amp Out {i-1}"
+            scale = 100 if i == 1 else 10  # scales in V/div
+            # list of VBS commands
+            vertical_settings = [
+                f"app.Acquisition.C{i}.VerOffset = 0",
+                f"app.Acquisition.C{i}.Coupling = \"DC1M\"",
+                f"app.Acquisition.C{i}.View = True",
+                f"app.Acquisition.C{i}.ViewLabels = True",
+                f"app.Acquisition.C{i}.BandwidthLimit = \"20MHz\"",
+                f"app.Acquisition.C{i}.VerScale = {scale}",
+                f"app.Acquisition.C{i}.LabelsText = \"{label}\"",
+                # Setup Measurements (P1, P2, etc.)
+                f"app.Measure.P{i}.ParamEngine = \"RootMeanSquare\"",
+                f"app.Measure.P{i}.Operator.Cyclic = \"True\"",
+                f"app.Measure.P{i}.Source1 = \"C{i}\"",
+                f"app.Measure.P{i}.View = True"
+            ]
+            # Send all vertical commands
+            for cmd in vertical_settings:
+                scope.write(f"VBS '{cmd}'")
+
+        # Horizontal - Configure initial timebase and trigger
+        horizontal_settings = [
+            "app.Acquisition.Horizontal.HorScale = 5e-3",
+            "app.Acquisition.Horizontal.HorOffset = 0",
+            "app.Acquisition.Trigger.Type = \"Edge\"",
+            "app.Acquisition.Trigger.Edge.Source = \"C1\"",
+            f"app.Acquisition.Trigger.Edge.Level = 60",
+            "app.Acquisition.TriggerMode = \"Auto\""
+        ]
+        # Send all horizontal/trigger commands
+        for cmd in horizontal_settings:
+            scope.write(f"VBS '{cmd}'")
+
+    else:
+        print("Unsupported oscilloscope model.")
+        # enter code for Keysight or other scope
+        # # stop_program_event.set()
 
     # # Wait for scope to finish setting up
-    # scope_device.query("*OPC?")  # Issue with MSO
-    time.sleep(0.2)
+    time.sleep(1)
 
 def make_datafile(timestamp, desktop_path: str = DESKTOP): # num_channels removed as it's not needed for header anymore
     """Generates a data file for the data based on start date and time.
@@ -269,17 +367,17 @@ def make_datafile(timestamp, desktop_path: str = DESKTOP): # num_channels remove
         except ValueError:
             print("Invalid path. Please enter a valid path.")
 
-def apply_vrms_bounds(number: float) -> float:
-    """
-    Applies upper and lower bounds to the Vrms readings 2nd CH+, not the AC line (CH 1).
-    """
-    return max(min(number, MAX_VRMS), 0)
-
 def apply_line_voltage_bounds(number: float) -> float:
     """
-    Applies upper and lower bounds to the Vrms readings for the AC Line (CH1).
+    Applies upper and lower (0) bounds to the Vrms readings for the AC Line (CH1).
     """
     return max(min(number, MAX_LINE_VOLTAGE_VRMS), 0)
+
+def apply_amp_output_bounds(number: float) -> float:
+    """
+    Applies upper and lower (0)bounds to the Vrms readings 2nd CH+   Note- NOT AC line (CH 1).
+    """
+    return max(min(number, MAX_VRMS), 0)
 
 def log_duration_to_file(save_directory, data_file_name, event_count, start_time, end_time, line_voltage_avg, state, duration_seconds):
     """
@@ -381,44 +479,63 @@ try:
     keyboard.add_hotkey('q', on_q_press)
     keyboard.add_hotkey('esc', on_esc_press)
 
-    # Initialize Resource Manager
+    # Initialize Resource Manager and check connection to instrument
     rm = pyvisa.ResourceManager()
-    connected_instrument = connect_to_instrument(rm, DEFAULT_IP_ADDRESS)
-    if connected_instrument is None:
+    scope, brand = connect_to_instrument(rm, default_ip=DEFAULT_IP_ADDRESS)
+    if scope is None:
         print("Failed to connect to the instrument. Exiting.")
         exit() # Exit if connection failed
+    if brand == "other":
+        print("Connected to an unsupported instrument. Proceed with caution.")
 
-    # Get the number of channels from user
-    num_channels_to_monitor = get_num_channels()
+    # Get maximum number of channels on this scope model
+    max_ch_on_scope = get_max_channels()      # Some scopes have 2, 4, or 8 CH.
 
-    # Get desired ON/OFF thresholds from user
-    limits = get_thresholds()
-    high_limit = limits[0]
-    low_limit = limits[1]
-    print("high_limit = ", high_limit, ", low_limit = ", low_limit)
+    # Get the number of channels from user being hooked up and monitoring. 
+    num_channels_to_monitor = get_num_channels(max_ch_on_scope)
 
-    # Set up channels if needed based on the user input
+    # Get AC Line threshold levels
+    print("Enter AC Line Vrms ON/OFF thresholds:")
+    acline_high_limit, acline_low_limit = get_thresholds(
+        default_on_value=80, 
+        default_off_value=60, 
+        max_limit=264, 
+        min_limit=1
+    )
+    print("AC Line Vrms ON = ", acline_high_limit, ", AC Line Vrms OFF = ", acline_low_limit)
+
+    # Get Amp Output threshold levels
+    print("Enter Amp Output Vrms ON/OFF thresholds:")
+    amp_high_limit, amp_low_limit = get_thresholds(
+        default_on_value=9.0, 
+        default_off_value=7.0, 
+        max_limit=20.0,
+        min_limit=1
+    )
+    print("Amp Output Vrms ON = ", amp_high_limit, ", Amp Output Vrms OFF = ", amp_low_limit)
+
+    # Set up scope?
     setup_needed = input("(L)eave scope alone or (S)etup contiguous channels?: ").strip()
     if setup_needed.lower() == 'l':
         print("Skipping scope setup. Ensure channels are configured correctly before starting data acquisition.")
     else:
-        setup_scope(connected_instrument, num_channels_to_monitor)
+        print("Attempting to set up scope.. .")
+        setup_scope(scope, num_channels_to_monitor, max_ch_on_scope, brand)
+        print("Setup complete. Check scope settings acceptable before starting data acquisition.")
 
-    # Create a data file for logging
+    # Create a data file for logging based on the current timestamp. This time/data log be used for duration of test.
     last_state_change_time = datetime.datetime.now()
-    paths = make_datafile(last_state_change_time, DESKTOP)
-    user_path = paths[0]
-    datafile_name = paths[1]
+    user_path, datafile_name = make_datafile(last_state_change_time, DESKTOP)
     full_data_path = os.path.join(user_path, datafile_name)
     print("Created file for data as", datafile_name)
 
     # Notify user program is off and running
-    print(f"Monitoring for ON (all channels > {high_limit:.2f} Vrms) and OFF (all channels < {low_limit:.2f} Vrms) states.")
+    print(f"Monitoring for ON (all channels > {acline_high_limit:.2f} Vrms) and OFF (all channels < {acline_low_limit:.2f} Vrms) states.")
     no_response = input("Check Line voltage and amp outputs are OFF (0V) before begining. Hit Enter to continue...")
     print("Press 'q','esc', or 'Crtl-C' to stop the program at any time.")
     print("Start monitoring...")
 
-    # Main loop
+    # ************** MAIN LOOP
     while not stop_program_event.is_set():
         time.sleep(0.05) # Small delay for keyboard input before checking if scope triggered
 
@@ -460,7 +577,7 @@ try:
                         current_line_voltage_snapshot = sum(line_voltage_readings_queue) / len(line_voltage_readings_queue)
                     # Else, current_line_voltage_snapshot remains 0.0 if queue is empty (shouldn't happen here)
                 else: # Apply bounds only if it's NOT channel 1
-                    v_rms = apply_vrms_bounds(v_rms)
+                    v_rms = apply_amp_output_bounds(v_rms)
                 v_rms_readings.append(v_rms)
 
             except pyvisa.errors.VisaIOError as e:
@@ -480,20 +597,20 @@ try:
             continue
 
         # Determine the potential new state based on current readings for CH2+
-        all_channels_on = all(v >= high_limit for v in v_rms_readings_for_state_check)
-        all_channels_off = all(v <= low_limit for v in v_rms_readings_for_state_check)
+        all_channels_on = all(v >= amp_high_limit for v in v_rms_readings_for_state_check)
+        all_channels_off = all(v <= amp_low_limit for v in v_rms_readings_for_state_check)
 
         # State Establishment/Transition Logic
         if current_state == "UNKNOWN":
             if all_channels_on:
                 current_state = "ON"
                 last_state_change_time = current_time
-                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}")
+                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {acline_low_limit}")
                 print(f"Initial state detected as ON. Will start logging on next transition to OFF.")
             elif all_channels_off:
                 current_state = "OFF"
                 last_state_change_time = current_time
-                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
+                connected_instrument.write(f"TRIGger:A:LEVel:CH1 {acline_high_limit}")
                 print(f"Initial state detected as OFF. Will start logging on next transition to ON.")
             else:
                 # Still in an indeterminate state or no clear ON/OFF. Keep current_state as UNKNOWN.
@@ -520,17 +637,17 @@ try:
                 # Set the trigger level for the next transition depending on state
                 if current_state == "ON":       # State is ON, set low limit
                     if is_rigol:
-                        connected_instrument.write(f":TRIGger:EDGe:LEVel {low_limit}")
+                        connected_instrument.write(f":TRIGger:EDGe:LEVel {acline_low_limit}")
                     elif is_tek:
-                        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}")
+                        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {acline_low_limit}")
                     else:
                         print("Unsupported oscilloscope model. Please use a Rigol or Tektronix scope.")
                         stop_program_event.set()
                 else:                           # State is OFF, set high limit
                     if is_rigol:
-                        connected_instrument.write(f":TRIGger:EDGe:LEVel {high_limit}")
+                        connected_instrument.write(f":TRIGger:EDGe:LEVel {acline_high_limit}")
                     elif is_tek:
-                        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}")
+                        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {acline_high_limit}")
                     else:
                         print("Unsupported oscilloscope model. Please use a Rigol or Tektronix scope.")
                         stop_program_event.set()
@@ -547,9 +664,9 @@ try:
                     last_state_change_time = current_time
                     # Set trigger for next OFF detection
                     if is_rigol: 
-                        connected_instrument.write(f":TRIGger:EDGe:LEVel {low_limit}")
+                        connected_instrument.write(f":TRIGger:EDGe:LEVel {acline_low_limit}")
                     else:
-                        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {low_limit}") 
+                        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {acline_low_limit}") 
 
                 elif current_state == "ON" and new_actual_state == "OFF":
                     # Transition from ON to OFF
@@ -567,9 +684,9 @@ try:
                     last_state_change_time = current_time
                     # Set trigger for next OFF detection
                     if is_rigol: 
-                        connected_instrument.write(f":TRIGger:EDGe:LEVel {high_limit}")
+                        connected_instrument.write(f":TRIGger:EDGe:LEVel {acline_high_limit}")
                     else:
-                        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {high_limit}") 
+                        connected_instrument.write(f"TRIGger:A:LEVel:CH1 {acline_high_limit}") 
 
             # *********  Only needed for debug  ***********
             # print(f"CH2+ Readings for State Check: {[f'{v:.3f}' for v in v_rms_readings_for_state_check]}")
