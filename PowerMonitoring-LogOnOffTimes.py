@@ -5,14 +5,13 @@ Description- Continuously monitor AC Line (CH1) and Amp Output (CH2+), logging O
 
 Equipment- Scope in autorun trigger mode using measurements from Rigol, Tektronix, LeCroy, or Keysight
 
-User must input IP address, number of output load channels to monitor (1-7), 
-drop-out monitoring preferences (latency or drop-out delay, thresholds, 
-if amplifier signal output need to be monitored for drop-outs and at what time interval.  
+User must input IP address, number of output load channels to monitor (1-7), if drop-out monitoring required and
+if so, the drop-out delay, thresholds for ON/OFF for both AC Line and Amp Output.
 
-Minimum channels to monitor is 1, i.e., the line voltage and at least one amplifier channel (CH2). 
-User is given the option for this program to set up the scope on contiguous channels.
+Minimum channels to monitor is one, i.e., the line voltage; and if load checks are required, at least one amp 
+channel (CH2).  User is given the option for this program to set up the scope on contiguous channels.
 
-Data is saved to csv file and converts that file to an Excel file at the end.
+Data is saved to CSV file. At the end of test, an Excel file is created from the CSV file.
 
 Author: C. Wong
 Last Modified: 20260406
@@ -308,7 +307,7 @@ def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: 
         The connected PyVISA instrument object and brand label (string).
     """
     while True:
-        user_input = input(f"Enter IP address, 'q' twice to quit, 'd' for default (Default {default_ip}): ").strip()
+        user_input = input(f"Enter IP address or 'd' for default (Default {default_ip}): ").strip()
         
         if user_input.lower() == 'q':
             return None, None
@@ -355,13 +354,13 @@ def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: 
                     instr.close()
                 except:
                     pass
-            print("Retrying... (Press 'q' twice to stop)")
+            print("Retrying... (Press Ctrl+C to stop)")
             time.sleep(1)
 
 def get_max_channels():
     """
     Asks the user to input the physical maximum number of channels (2-8) on scope.
-    'd' or Enter returns the default of 4.
+    'd' or Enter returns the default.
     """
     user_input = input("Enter the TOTAL physical maximum number of channels (2-8) or 'd' for default = 4): ").strip().lower()
 
@@ -377,11 +376,11 @@ def get_max_channels():
         if 2 <= max_channels <= 8:
             return max_channels
         else:
-            print(f"Value {max_channels} is out of range. Using default (4).")
+            print(f"Value {max_channels} is out of range. Using default.")
             return 4
             
     except ValueError:
-        print("Invalid input format. Using default (4).")
+        print("Invalid input format. Using default.")
         return 4
 
 def get_num_channels(max_channels):
@@ -603,7 +602,11 @@ def write_to_excel(filename, path):
 rm = None
 scope = None
 start_time = datetime.datetime.now()
+last_state_time = datetime.datetime.now()
 event_counter = 0
+current_state = "UNKNOWN"
+user_path = None
+datafile_name = None
 first_transition_logged = False
 steady_state_line_voltage = 0.0
 
@@ -660,13 +663,13 @@ try:
         print("Setup complete.")
 
     # Trigger mode auto or normal?
-    run_mode = input("(L)eave scope along or (S)et up TRIGGER in auto or normal mode? : ").strip().lower()
+    run_mode = input("(L)eave scope alone or (S)et up TRIGGER in auto or normal mode? : ").strip().lower()
     if run_mode == 's':
         print("Setting trigger mode.")
         scope.set_trigger()
         print("Trigger set up.")
     else: 
-        print("Verify all settings acceptable before starting data acquisition.")
+        print("Skipping trigger setup.")
 
     # Create a data file for logging based on the current timestamp. This time/data log be used for duration of test.
     start_time = datetime.datetime.now()
@@ -675,15 +678,11 @@ try:
     print("Created file ", datafile_name, " in path: ", user_path)
 
     # Notify user ready to start. Provide instructions for stopping the program and ensuring proper initial conditions.
-    input("Hit Enter to start monitoring...")
     print(f"Monitoring AC Line voltage > {ac_line_high_limit:.2f} Vrms ON and < {ac_line_low_limit:.2f} Vrms OFF.")
-    print("Press 'q' twice or 'Crtl-C' to stop the program.")
+    print("Verify scope settings are acceptable.\nPress 'Crtl-C' to stop the program.")  # q twice if using keyboard hotkey method and exe is run with admin privileges.
+    input("Hit Enter to start monitoring...")
 
-    # ************** MAIN LOOP  *****************
-    last_state_time = datetime.datetime.now() 
-    current_state = "UNKNOWN"
-    event_counter = 0
-    
+    # ************** MAIN LOOP  *****************     
     while not stop_program_event.is_set():
         time.sleep(0.05) # Small delay for keyboard input before checking if scope triggered
 
