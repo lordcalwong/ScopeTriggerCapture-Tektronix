@@ -13,8 +13,10 @@ channel (CH2).  User is given the option for this program to set up the scope on
 
 Data is saved to CSV file. At the end of test, an Excel file is created from the CSV file.
 
+No NI-VISA, licensing or accounts required.
+
 Author: C. Wong
-Last Modified: 20260406
+Last Modified: 20260409
 """
 
 # Standard library
@@ -30,6 +32,7 @@ from glob import glob
 import pyvisa
 import keyboard
 from openpyxl import Workbook
+from openpyxl.styles import Font
 
 # Print the header at runtime.
 print(__doc__)
@@ -38,7 +41,7 @@ print(__doc__)
 DEFAULT_IP_ADDRESS = '10.100.52.231' # 10.101.100.151, 169.254.131.118, 192.168.1.90
 MAX_LINE_VOLTAGE_VRMS = 350.0       # volts rms limit for AC Line (CH1)
 MAX_VRMS = 50.0                     # volts (at 8 ohms that's ~312 W foraudio CHs (CH2+)
-LINE_VOLTAGE_WINDOW_SIZE = 4        # Window size for the running average
+LINE_VOLTAGE_WINDOW_SIZE = 3        # Window size for the running average
 SETTLING_TIME = 3.0                 # seconds
 LOAD_CHECK_INTERVAL = 2             # seconds between checking amplifier channels
 LAST_LOAD_CHECK_TIME = 0            # timestamp of the last amplifier load check
@@ -116,7 +119,7 @@ class TekScope(Scope):
             self.instr.write(f"CH{i}:SCALe {scale}")
             self.instr.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")
             self.instr.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")
-        self.instr.write("HORizontal:SCAle 200E-6")
+        self.instr.write("HORizontal:SCAle 10E-3")
         self.instr.write("HORizontal:POSition 50")
         self.instr.write("TRIGger:A:EDGE:SOUrce CH1")
         self.instr.write("TRIGger:A:EDGE:COUPling DC")
@@ -155,7 +158,7 @@ class RigolScope(Scope):
             self.instr.write(f":CHANnel{i}:COUPling DC")
             self.instr.write(f":CHANnel{i}:INVert OFF")
             self.instr.write(f":CHANnel{i}:UNITs VOLT")
-        self.instr.write(":TIMebase:SCALe 200e-6")
+        self.instr.write(":TIMebase:SCALe 10e-3")
         self.instr.write(":TIMebase:DELay 50")
         self.instr.write(":TRIGger:MODE EDGE")
         self.instr.write(":TRIGger:EDGe:SOUrce CHAN1")
@@ -207,7 +210,7 @@ class LeCroyScope(Scope):
             ]
             for cmd in vertical_settings: self.instr.write(f"VBS '{cmd}'")
         horizontal_settings = [
-            "app.Acquisition.Horizontal.HorScale = 5e-3",
+            "app.Acquisition.Horizontal.HorScale = 10e-3",
             "app.Acquisition.Horizontal.HorOffset = 0",
             "app.Acquisition.Trigger.Type = \"Edge\"",
             "app.Acquisition.Trigger.Edge.Source = \"C1\"",
@@ -250,7 +253,7 @@ class KeysightScope(Scope):
             self.instr.write(f":CHANnel{i}:COUPling DC")
             self.instr.write(f":CHANnel{i}:INVert OFF")
             self.instr.write(f":CHANnel{i}:UNITs VOLT")
-        self.instr.write(":TIMebase:RANGe 200e-6")
+        self.instr.write(":TIMebase:RANGe 100e-3")
         self.instr.write(":TIMebase:POSition 0")
         self.instr.write(":TRIGger:MODE EDGE")
         self.instr.write(":TRIGger:EDGE:SOURce CHANnel1")
@@ -307,7 +310,7 @@ def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: 
         The connected PyVISA instrument object and brand label (string).
     """
     while True:
-        user_input = input(f"Enter IP address or 'd' for default (Default {default_ip}): ").strip()
+        user_input = input(f"Enter IP address (Default {default_ip})   'd' for default :").strip()
         
         if user_input.lower() == 'q':
             return None, None
@@ -362,7 +365,7 @@ def get_max_channels():
     Asks the user to input the physical maximum number of channels (2-8) on scope.
     'd' or Enter returns the default.
     """
-    user_input = input("Enter the TOTAL physical maximum number of channels (2-8) or 'd' for default = 4): ").strip().lower()
+    user_input = input("Enter the TOTAL physical maximum number of channels (2-8, Default = 4)   'd' for default :").strip().lower()
 
     # 1. Handle the explicit default cases
     if user_input == 'd' or user_input == '':
@@ -385,20 +388,23 @@ def get_max_channels():
 
 def get_num_channels(max_channels):
     """
-    Asks the user to input the number of load channels to monitor (2-8).
-    Note- First channel (CH1) monitors AC Line. Additional channels (CH2+) monitor
-    amplifier outputs (CH2+).
+    Asks user for number of load channels to monitor (2-8).
+    Note- First channel (CH1) AC Line. Additional channels (CH2+) for  amplifier outputs.
+    Default to 2.
     """
     print("First channel monitors AC Line. Additional channels monitor amplifier outputs.")
     while True:
         try:
-            num_channels = int(input(f"Including AC Line (CH1), enter total number of CHs (Enter 2-{max_channels}): "))
+            user_input = input(f"Including AC Line (CH1), enter total number of CHs, (2-{max_channels}, Default = 2)   'd' for default :").strip().lower()
+            if user_input == 'd':
+                return 2
+            num_channels = int(user_input)
             if 2 <= num_channels <= max_channels:
                 return num_channels
             else:
                 print(f"Invalid input. Please enter a number between 2 and {max_channels}.")
         except ValueError:
-            print("Invalid input. Please enter a number.")
+            print("Invalid input. Please enter a valid number or 'd'.")
 
 def get_thresholds(default_on_value, default_off_value, max_limit=300, min_limit=0):
     """
@@ -413,15 +419,15 @@ def get_thresholds(default_on_value, default_off_value, max_limit=300, min_limit
     while True:
         try:
             # ON Threshold Prompt
-            on_prompt = (f"  Enter ON rms level (Default: {default_on_value:.2f}V, "
-                         f"Min: {min_limit}V, Max: {max_limit}V, 'd' for default): ")
+            on_prompt = (f"  Enter ON rms level  (Default: {default_on_value:6.2f}V, "
+                         f"Min: {min_limit:6.2f}V, Max: {max_limit:6.2f}V)  'd' for default :")
             user_on_input = input(on_prompt).strip().lower()
             
             on_rms_level = default_on_value if user_on_input == 'd' else float(user_on_input)
 
             # OFF Threshold Prompt (Added min_limit here for UI consistency)
-            off_prompt = (f"  Enter OFF rms level (Default: {default_off_value:.2f}V, "
-                          f"Min: {min_limit}V, 'd' for default): ")
+            off_prompt = (f"  Enter OFF rms level (Default: {default_off_value:6.2f}V, "
+                          f"Min: {min_limit:6.2f}V, Max: {on_rms_level:6.2f}V)  'd' for default :")
             user_off_input = input(off_prompt).strip().lower()
             
             off_rms_level = default_off_value if user_off_input == 'd' else float(user_off_input)
@@ -430,32 +436,14 @@ def get_thresholds(default_on_value, default_off_value, max_limit=300, min_limit
             if on_rms_level < min_limit:
                 print(f"  Error: ON threshold cannot be below {min_limit}V.")
             elif on_rms_level > max_limit:
-                print(f"  Error: ON threshold cannot exceed {max_limit}V.")
+                print(f"  Error: ON threshold cannot exceed {max_limit:6.2f}V.")
             elif off_rms_level < min_limit:
-                print(f"  Error: OFF threshold cannot be below {min_limit}V.")
+                print(f"  Error: OFF threshold cannot be below {min_limit:6.2f}V.")
             elif off_rms_level >= on_rms_level:
                 print(f"  Error: OFF threshold must be less than the ON threshold (OFF < ON).")
             else:
                 return on_rms_level, off_rms_level
 
-        except ValueError:
-            print("Invalid input. Please enter a numerical value or 'd'.")
-
-def get_power_on_delay():
-    """
-    Prompts user for the power-on delay in seconds before checking load channels.
-    Default is 10 seconds. Minimum is 5 second.
-    """
-    while True:
-        try:
-            user_input = input("Enter power-on delay in seconds before checking load channels ('d' for default: 10s, Min: 5s): ").strip().lower()
-            if user_input == 'd' or user_input == '':
-                return 10
-            delay = float(user_input)
-            if delay < 5:
-                print("Power-on delay must be at least 5 second.")
-            else:
-                return delay
         except ValueError:
             print("Invalid input. Please enter a numerical value or 'd'.")
 
@@ -479,7 +467,7 @@ def make_datafile(timestamp, dropout_enabled,dropout_interval, path=default_path
         header_list.append(f"Drop-out Check ({dropout_interval} sec)")
     header_string = ",".join(header_list)
 
-    user_path_input = input(f"Enter data path or 'd' for desktop: ").strip()
+    user_path_input = input(f"Enter data path (Default = Desktop)   'd' for default :").strip()
     user_path = path if user_path_input.lower() == 'd' or not user_path_input else user_path_input
     filename = timestamp.strftime("%Y%m%d_%H%M%S.csv")
     full_path = os.path.join(user_path, filename)
@@ -518,17 +506,17 @@ def get_dropout_settings():
     """
     Prompts user for drop-out monitoring configuration.
     """
-    check_dropout = input("Enable Signal Drop-out checking? (Y/N, 'd' = Yes): ").strip().lower() != 'n'
+    check_dropout = input("Enable Signal Drop-out checking? (Y-Default/N)   'd' for default :").strip().lower() != 'n'
     
     interval = 2
     delay = 10
     
     if check_dropout:
         while True:
-            val = input("Enter interval for checking load signals (2-300 sec, 'd' for default: 2): ").strip()
+            val = input("Enter interval for checking load signals (2-300 sec, Default =3)   'd' for default :").strip()
             
             if val == 'd' or val == '':
-                interval = 2
+                interval = 3
                 break
 
             try:
@@ -540,10 +528,10 @@ def get_dropout_settings():
                 print("Invalid entry. Please enter a number or 'd'.")
             
         while True:
-            val = input("Enter wait or delay time (after AC Line is ON) before checking load signals (5-300 sec or 'd' for default = 10): ").strip()
+            val = input("Enter delay time (after AC Line ON) before checking load signals (5-300 sec, default = 12)  'd' for default :").strip()
             
             if val == 'd' or val == '':
-                delay = 10
+                delay = 12
                 break
 
             try:
@@ -567,9 +555,10 @@ def log_event(path, filename, count, start_time, end_time, line_v, state, durati
             # If formatting fails, log as string
             duration_str = f"{str(duration):>9}"
 
+        # Rather than ISO 8601 timestamp, replace T with a space for conversion to Excel datetime format later. Excel custom format will be yyyy-mmm-dd hh:mm:ss.000 
         with open(full_path, "a") as f:
-            line = (f"{count},{start_time.strftime('%Y-%m-%d %H:%M:%S.%f')}, "
-                   f"{end_time.strftime('%Y-%m-%d %H:%M:%S.%f')},{line_v:.3f}, "
+            line = (f"{count},{start_time.strftime('%Y-%m-%d %H:%M:%S.%f')},"
+                   f"{end_time.strftime('%Y-%m-%d %H:%M:%S.%f')},{line_v:.3f},"
                    f"{state},{duration_str},{label}")
             f.write(line + "\n")
 
@@ -580,22 +569,70 @@ def log_event(path, filename, count, start_time, end_time, line_v, state, durati
 def write_to_excel(filename, path): 
     full_path_csv = os.path.join(path, filename)
     full_path_xlsx = os.path.join(path, os.path.splitext(filename)[0] + ".xlsx")
+    
     wb = Workbook()
     ws = wb.active
     ws.title = "Power Monitoring"
+    header_font = Font(bold=True)
+
     try:
         with open(full_path_csv, 'r') as f:
             reader = csv.reader(f)
+            
             for r_idx, row in enumerate(reader, 1):
-                processed = []
+                # Add the data to the row
+                ws.append(row)
+                
+                # Format the header row
+                if r_idx == 1:
+                    for c_idx in range(len(row)):
+                        cell = ws.cell(row=r_idx, column=c_idx + 1)
+                        cell.font = header_font
+                    continue
+                
+                # Iterate through the cells in the current row to apply types and formats
                 for c_idx, val in enumerate(row):
-                    if r_idx > 1 and c_idx in [0, 3, 5]:   
-                        try: processed.append(float(val))
-                        except: processed.append(val)
-                    else: processed.append(val)
-                ws.append(processed)
+                    cell = ws.cell(row=r_idx, column=c_idx + 1)
+                    
+                    # Columns 1 -> Integer
+                    if c_idx in [0]:
+                        try:
+                            cell.value = float(val)
+                            cell.number_format = '0'
+                        except (ValueError, TypeError):
+                            pass # Keep as string if conversion fails
+
+                    # Columns 4 and 6 (indices 3, 5) -> Numbers
+                    if c_idx in [3, 5]:
+                        try:
+                            cell.value = float(val)
+                            cell.number_format = '0.000'
+                        except (ValueError, TypeError):
+                            pass # Keep as string if conversion fails
+                            
+                    # Columns 2 and 3 (indices 1, 2) -> Dates with custom format
+                    elif c_idx in [1, 2]:
+                        try:
+                            # Parse the specific string format: 2026-04-07 11:33:08.208383
+                            dt_obj = datetime.datetime.strptime(val, '%Y-%m-%d %H:%M:%S.%f')
+                            cell.value = dt_obj
+                            # Custom Excel format: yyyy-mmm-dd hh:mm:ss.000
+                            # Note: .000 in Excel displays milliseconds
+                            cell.number_format = 'yyyy-mmm-dd hh:mm:ss.000'
+                        except (ValueError, TypeError):
+                            pass # Keep as string if conversion fails
+
+        # Auto-adjust column widths so dates are visible
+        for column_cells in ws.columns:
+            # Set width to the length of the largest value in the column + a little extra
+            length = max(len(str(cell.value) or "") for cell in column_cells)
+            ws.column_dimensions[column_cells[0].column_letter].width = length + 2
+            
         wb.save(full_path_xlsx)
-    except Exception as e: print(f"Excel Error: {e}")
+        print(f"File saved successfully: {full_path_xlsx}")
+        
+    except Exception as e: 
+        print(f"Excel Error: {e}")
 
 
 # ************** MAIN
@@ -633,8 +670,8 @@ try:
     # Get AC Line threshold levels
     print("AC Line ON/OFF thresholds:")
     ac_line_high_limit, ac_line_low_limit = get_thresholds(
-        default_on_value=80, 
-        default_off_value=70, 
+        default_on_value=90, 
+        default_off_value=80, 
         max_limit=275, 
         min_limit=1
     )
@@ -643,8 +680,8 @@ try:
     # Get Amp Output threshold levels
     print("Amp Output ON/OFF thresholds:")
     amp_high_limit, amp_low_limit = get_thresholds(
-        default_on_value=7.0, 
-        default_off_value=2.0, 
+        default_on_value=5, 
+        default_off_value=1, 
         max_limit=20.0,
         min_limit=1
     )
@@ -654,16 +691,17 @@ try:
     do_enabled, do_interval, do_delay = get_dropout_settings()
 
     # Set up scope?
-    setup_needed = input("(L)eave scope alone or (S)etup SCOPE CHANNELS (contiguous): ").strip()
-    if setup_needed.lower() == 'l':
-        print("Skipping scope setup.")
-    else:
+    setup_needed = input("(S)et up SCOPE? (Default= leave alone)   'd' for default :").strip()
+    if setup_needed.lower() == 's':
         print("Attempting to set up scope.. .")
         scope.setup(num_channels_to_monitor, max_ch_on_scope)
         print("Setup complete.")
+    else:
+        print("Skipping scope setup.")
+
 
     # Trigger mode auto or normal?
-    run_mode = input("(L)eave scope alone or (S)et up TRIGGER in auto or normal mode? : ").strip().lower()
+    run_mode = input("(S)et up TRIGGER? (Default= leave alone) 'd' for default :").strip().lower()
     if run_mode == 's':
         print("Setting trigger mode.")
         scope.set_trigger()
@@ -682,10 +720,16 @@ try:
     print("Verify scope settings are acceptable.\nPress 'Crtl-C' to stop the program.")  # q twice if using keyboard hotkey method and exe is run with admin privileges.
     input("Hit Enter to start monitoring...")
 
-    # ************** MAIN LOOP  *****************     
-    while not stop_program_event.is_set():
-        time.sleep(0.05) # Small delay for keyboard input before checking if scope triggered
+    # ************** MAIN LOOP  ***************** 
+    TARGET_PERIOD = 0.05  # fixed period of 50ms
+    ON_CONFIRMATION_THRESHOLD = 2  # Consecutive readings required to confirm ON
+    on_confirmation_count = 0
+    OFF_CONFIRMATION_THRESHOLD = 2  # Consecutive readings required to confirm OFF
+    off_confirmation_count = 0
 
+    while not stop_program_event.is_set():
+        loop_start = time.perf_counter()
+        
         # Get measurements from scope.
         meas_time, all_readings, avg_line = scope.get_measurements(
             num_channels_to_monitor, current_state, do_interval
@@ -693,30 +737,16 @@ try:
         # Check if measurement time failed and skip this cycle.
         if meas_time is None: continue
 
+        # sleep timer
+        elapsed = time.perf_counter() - loop_start
+        sleep_time = max(0, TARGET_PERIOD - elapsed)
+        time.sleep(sleep_time)
+
         ac_line_voltage = all_readings[0]
         new_amp_data = all_readings[1:] 
 
-        # Assign state Booleans from ac line (instantaneous)
+        # Assign state based on Fast ON, Fast OFF
         ac_line_on, ac_line_off = ac_line_voltage >= ac_line_high_limit, ac_line_voltage <= ac_line_low_limit     
-
-        # Update steady state voltage logic
-        if current_state == "ON":
-            elapsed = (meas_time - last_state_time).total_seconds()
-            if elapsed < SETTLING_TIME:
-                steady_state_line_voltage = max(steady_state_line_voltage, ac_line_voltage)
-            elif ac_line_on: steady_state_line_voltage = avg_line
-
-            # Periodic Dropout Check and Log
-            if do_enabled and None not in new_amp_data:
-                if elapsed > do_delay:
-                    if not all(v >= amp_high_limit for v in new_amp_data):
-                        event_counter += 1
-                        min_amp_out = min(new_amp_data)
-                        # Drop-out records meas_time twice (both the start and end time) to note 'instance' of event
-                        log_event(user_path, datafile_name, event_counter, meas_time, meas_time, avg_line, "ON", "'-", f"* Amp Out MIN: {min_amp_out:.3f}Vrms")
-                        print(f"[{meas_time.strftime('%H:%M:%S')}] DROP-OUT DETECTED!  "
-                              f"Line Voltage: {avg_line:.3f}Vrms, "
-                              f"Amp Out MIN: {min_amp_out:.3f}Vrms)")
                                     
         # State Establishment/Transition Logic
         if current_state == "UNKNOWN":
@@ -739,19 +769,56 @@ try:
         # Current_state is either 'ON' or 'OFF'. Proceed to check for transitions.
         new_actual_state = current_state # Assume no change unless clear transition
 
-        # Determine if there's a *real* transition from the established state
-        if current_state == "OFF" and ac_line_on:
-            new_actual_state = "ON"
-        elif current_state == "ON" and ac_line_off:
-            new_actual_state = "OFF"
+        # *real* transition from the established state with debounce
+        if current_state == "OFF":
+            if ac_line_on:
+                on_confirmation_count += 1
+            elif ac_line_off:  # Only reset if we are sure it's still solidly OFF
+                on_confirmation_count = 0 
+            
+            if on_confirmation_count >= ON_CONFIRMATION_THRESHOLD:
+                new_actual_state = "ON"
+                on_confirmation_count = 0
+                off_confirmation_count = 0
+
+        elif current_state == "ON":
+            if ac_line_off:
+                off_confirmation_count += 1
+            elif ac_line_on:  # Only reset if we are sure it's still solidly ON
+                off_confirmation_count = 0
+
+            if off_confirmation_count >= OFF_CONFIRMATION_THRESHOLD:
+                new_actual_state = "OFF"
+                off_confirmation_count = 0
+                on_confirmation_count = 0
+
+        # Update steady state voltage logic
+        if current_state == "ON":
+            elapsed = (meas_time - last_state_time).total_seconds()
+            if elapsed < SETTLING_TIME:
+                steady_state_line_voltage = max(steady_state_line_voltage, ac_line_voltage)
+            elif ac_line_on and not ac_line_off:
+                steady_state_line_voltage = avg_line
+
+            # Periodic Dropout Check and Log
+            if do_enabled and None not in new_amp_data and new_actual_state == "ON":
+                if elapsed > do_delay:
+                    if not all(v >= amp_high_limit for v in new_amp_data):
+                        event_counter += 1
+                        min_amp_out = min(new_amp_data)
+                        # Drop-out records meas_time twice (both the start and end time) to note 'instance' of event
+                        log_event(user_path, datafile_name, event_counter, meas_time, meas_time, avg_line, "ON", "N/A", f"* Amp Out MIN: {min_amp_out:.1f}Vrms")
+                        print(f"[{meas_time.strftime('%H:%M:%S')}] DROP-OUT DETECTED!  "
+                              f"Line Voltage: {avg_line:6.3f}Vrms, "
+                              f"Amp Out MIN: {min_amp_out:6.3f}Vrms)")
 
         # This handles the intermediate or stable state where no clear transition occurs.
         if new_actual_state != current_state:
             if not first_transition_logged:
-                # This is the very first transition detected. Don't log the initial state.
-                print(f"[{meas_time.strftime('%H:%M:%S')}] OFF. Waiting for first transition to ON.")
                 current_state = new_actual_state
                 start_time = meas_time
+                last_state_time = meas_time
+                print(f"[{meas_time.strftime('%H:%M:%S')}] First transition detected: System is now {current_state}.")
                 first_transition_logged = True
                 # Set the trigger level for the next transition depending on state
                 if current_state == "ON":       # State is ON, set low limit
@@ -765,7 +832,7 @@ try:
                 if current_state == "OFF" and new_actual_state == "ON":
                     # Transition from OFF to ON  (log the previous OFF state, reset timers, line voltage, off trigger)
                     log_event(user_path, datafile_name, event_counter, start_time, meas_time, 0.0, "OFF", duration)
-                    print(f"[{meas_time.strftime('%H:%M:%S')}] OFF to ON.  OFF duration was: {duration:.3f} seconds.")
+                    print(f"[{meas_time.strftime('%H:%M:%S')}] ON.   Detected line voltage is {ac_line_voltage:8.3f} Vrms.  (Previous OFF duration was {duration:8.3f} sec.)")
                     current_state = "ON"
                     start_time = meas_time
                     last_state_time = meas_time
@@ -778,7 +845,7 @@ try:
                     voltage_to_log = steady_state_line_voltage
 
                     log_event(user_path, datafile_name, event_counter, start_time, meas_time, voltage_to_log, "ON", duration)
-                    print(f"[{meas_time.strftime('%H:%M:%S')}] ON to OFF.  ON duration was: {duration:.3f} seconds. Line Voltage: {voltage_to_log:.3f}Vrms")
+                    print(f"[{meas_time.strftime('%H:%M:%S')}] OFF.  ON  duration was {duration:8.3f} sec at {voltage_to_log:6.3f} Vrms line.")
                     current_state = "OFF"
                     start_time = meas_time
                     # Set trigger for next OFF detection
@@ -817,6 +884,7 @@ finally:
 
     if current_state == "OFF":
         # Always log 0.0 for line voltage if the final state is OFF
+        final_voltage_to_log = 0.0
         if user_path and datafile_name:
             log_event(user_path, datafile_name, event_counter, start_time, final_time, final_voltage_to_log, current_state, duration)
         print(f"Program stopped. Final {current_state} duration: {duration:.3f} seconds. Line Voltage hardcoded for OFF state.)")
