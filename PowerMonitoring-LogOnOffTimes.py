@@ -3,7 +3,9 @@ Power Monitoring- LogOnOffTimes.py
 
 Description- Continuously monitor AC Line (CH1) and Amp Output (CH2+), logging ON/OFF times (based on AC line voltage).
 
-Equipment- Scope in autorun trigger mode using measurements from Rigol, Tektronix, LeCroy, or Keysight
+Equipment- LXI connected scope in autorun trigger mode using measurements from Rigol, Tektronix, LeCroy, or Keysight
+
+Software- No NI-VISA, licensing, or accounts required.
 
 User must input IP address, number of output load channels to monitor (1-7), if drop-out monitoring required and
 if so, the drop-out delay, thresholds for ON/OFF for both AC Line and Amp Output.
@@ -13,10 +15,8 @@ channel (CH2).  User is given the option for this program to set up the scope on
 
 Data is saved to CSV file. At the end of test, an Excel file is created from the CSV file.
 
-No NI-VISA, licensing or accounts required.
-
 Author: C. Wong
-Last Modified: 20260409
+Last Modified: 20260411
 """
 
 # Standard library
@@ -71,6 +71,9 @@ class Scope:
     def set_trigger_level(self, channel, level):
         pass
 
+    def set_timebase(self, ms_per_div):
+        pass
+
     def _query_vrms(self, channel):
         return "0.0"
     
@@ -85,23 +88,35 @@ class Scope:
             pass 
         self.instr.close()
 
-    def get_measurements(self, num_channels, current_state, check_interval, force_load=False):
+    def get_measurements(self, num_channels, current_state, check_interval, force_load=False, low_limit=None, high_limit=None):
         global LAST_LOAD_CHECK_TIME
         measurement_time = datetime.datetime.now()
         readings_all = []
         try:
+            # 1. Query AC Line first (fast loop)
             raw = self._query_vrms(1)
             v_line = apply_line_voltage_bounds(parse_visa_numeric(raw))
             readings_all.append(v_line)
             line_voltage_readings_queue.append(v_line)
             v_line_avg = sum(line_voltage_readings_queue)/len(line_voltage_readings_queue)
-            if current_state == "UNKNOWN" or force_load or (time.time() - LAST_LOAD_CHECK_TIME > check_interval):
+
+            # 2. Determine if a transition is "pending" (e.g., Line dropped while we were ON)
+            is_transitioning = False
+            if current_state == "ON" and low_limit is not None and v_line <= low_limit:
+                is_transitioning = True
+            elif current_state == "OFF" and high_limit is not None and v_line >= high_limit:
+                is_transitioning = True
+
+            # 3. Get remaining measurements if the line is stable
+            if not is_transitioning and (current_state == "UNKNOWN" or force_load or (time.time() - LAST_LOAD_CHECK_TIME > check_interval)):
                 LAST_LOAD_CHECK_TIME = time.time()
                 for i in range(2, num_channels + 1):
                     r = self._query_vrms(i)
                     readings_all.append(max(min(parse_visa_numeric(r), MAX_VRMS), 0)) 
             else:
-                readings_all.extend([None] * (num_channels - 1)) 
+                # Skip readings 
+                readings_all.extend([None] * (num_channels - 1))
+
             return measurement_time, readings_all, v_line_avg 
         except pyvisa.errors.VisaIOError:
             return None, None, None
@@ -119,7 +134,7 @@ class TekScope(Scope):
             self.instr.write(f"CH{i}:SCALe {scale}")
             self.instr.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; STATE 1")
             self.instr.write(f"MEASUrement:MEAS{i}:SOUrce CH{i}; TYPE RMS")
-        self.instr.write("HORizontal:SCAle 10E-3")
+        self.instr.write("HORizontal:SCAle 5E-3")
         self.instr.write("HORizontal:POSition 50")
         self.instr.write("TRIGger:A:EDGE:SOUrce CH1")
         self.instr.write("TRIGger:A:EDGE:COUPling DC")
@@ -134,6 +149,9 @@ class TekScope(Scope):
     def set_trigger_level(self, channel, level):
         self.instr.write(f"TRIGger:A:LEVel:CH{channel} {level}")
         self.instr.query("*OPC?")
+
+    def set_timebase(self, ms_per_div):
+        self.instr.write(f"HORizontal:SCAle {ms_per_div}")
 
     def _query_vrms(self, channel):
         return self.instr.query(f"MEASUrement:MEAS{channel}:VALue?")
@@ -158,7 +176,7 @@ class RigolScope(Scope):
             self.instr.write(f":CHANnel{i}:COUPling DC")
             self.instr.write(f":CHANnel{i}:INVert OFF")
             self.instr.write(f":CHANnel{i}:UNITs VOLT")
-        self.instr.write(":TIMebase:SCALe 10e-3")
+        self.instr.write(":TIMebase:SCALe 5e-3")
         self.instr.write(":TIMebase:DELay 50")
         self.instr.write(":TRIGger:MODE EDGE")
         self.instr.write(":TRIGger:EDGe:SOUrce CHAN1")
@@ -176,6 +194,9 @@ class RigolScope(Scope):
         self.instr.write(f":TRIGger:EDGe:LEVel {level}")
         self.instr.query("*OPC?")
 
+    def set_timebase(self, ms_per_div):
+        self.instr.write(f":TIMebase:SCALe {ms_per_div}")
+        
     def _query_vrms(self, channel):
         return self.instr.query(f":MEASure:VRMS? CHAN{channel}")
 
@@ -184,7 +205,7 @@ class RigolScope(Scope):
 
 class LeCroyScope(Scope):
     def setup(self, num_channels, max_channels):
-        print("Be sure to set scope, utilities to TCPIP (VXI-11). Setting up LeCroy scope...")
+        print("... Don't forget to set the scope (under Utilities->Utilities Setup->Remote) to LXI (VXI-11) for LeCroy...")
         reset_request = input("Reset scope? (Y/N): ").strip().lower()
         if reset_request == 'y':
             self.instr.write("*RST"); time.sleep(5); self.instr.write("*CLS"); time.sleep(2)
@@ -210,7 +231,7 @@ class LeCroyScope(Scope):
             ]
             for cmd in vertical_settings: self.instr.write(f"VBS '{cmd}'")
         horizontal_settings = [
-            "app.Acquisition.Horizontal.HorScale = 10e-3",
+            "app.Acquisition.Horizontal.HorScale = 5e-3",
             "app.Acquisition.Horizontal.HorOffset = 0",
             "app.Acquisition.Trigger.Type = \"Edge\"",
             "app.Acquisition.Trigger.Edge.Source = \"C1\"",
@@ -227,7 +248,9 @@ class LeCroyScope(Scope):
     def set_trigger_level(self, channel, level):
         self.instr.write(f"VBS 'app.Acquisition.Trigger.Edge.Source = \"C{channel}\"'")
         self.instr.write(f"VBS 'app.Acquisition.Trigger.Edge.Level = {level}'")
-        self.instr.query("*OPC?")
+
+    def set_timebase(self, ms_per_div):
+        self.instr.write(f"VBS 'app.Acquisition.Horizontal.HorScale = {ms_per_div}'")
 
     def _query_vrms(self, channel):
         return self.instr.query(f"VBS? 'return=app.Measure.P{channel}.Out.Result.Value'")
@@ -268,8 +291,10 @@ class KeysightScope(Scope):
 
     def set_trigger_level(self, channel, level):
         self.instr.write(f":TRIGger:EDGE:SOUR CHAN1;LEVel {level}")
-        self.instr.query("*OPC?")
 
+    def set_timebase(self, ms_per_div):
+        self.instr.write(f":TIMebase:RANGe {ms_per_div * 10}")
+        
     def _query_vrms(self, channel):
         return self.instr.query(f":MEASure:VRMS? CHANnel{channel}")
 
@@ -508,9 +533,6 @@ def get_dropout_settings():
     """
     check_dropout = input("Enable Signal Drop-out checking? (Y-Default/N)   'd' for default :").strip().lower() != 'n'
     
-    interval = 2
-    delay = 10
-    
     if check_dropout:
         while True:
             val = input("Enter interval for checking load signals (2-300 sec, Default =3)   'd' for default :").strip()
@@ -528,10 +550,10 @@ def get_dropout_settings():
                 print("Invalid entry. Please enter a number or 'd'.")
             
         while True:
-            val = input("Enter delay time (after AC Line ON) before checking load signals (5-300 sec, default = 12)  'd' for default :").strip()
+            val = input("Enter delay time (after AC Line ON) before checking load signals (5-300 sec, default = 10)  'd' for default :").strip()
             
             if val == 'd' or val == '':
-                delay = 12
+                delay = 10
                 break
 
             try:
@@ -670,8 +692,8 @@ try:
     # Get AC Line threshold levels
     print("AC Line ON/OFF thresholds:")
     ac_line_high_limit, ac_line_low_limit = get_thresholds(
-        default_on_value=90, 
-        default_off_value=80, 
+        default_on_value=85, 
+        default_off_value=75, 
         max_limit=275, 
         min_limit=1
     )
@@ -699,6 +721,23 @@ try:
     else:
         print("Skipping scope setup.")
 
+    # Set timebase?
+    print("For 50 to 60 Hz line is recommended for ~3 full cycles in the window for 60Hz.")
+    prompt = f"Enter timebase (2 to 10 ms/div) ?     'd' for default = 5e-3 :"
+    user_input = input(prompt).strip().lower()
+    if user_input == 'd' or user_input == '':
+        print("Using default timebase.")
+    else:
+        try:
+            timebase_val = float(user_input)
+            if 0.002 <= timebase_val <= 0.010:
+                print(f"Setting timebase to {timebase_val} s/div")
+                scope.set_timebase(timebase_val)
+            else:
+                print(f"Error: {timebase_val} is out of range. Please use 0.002 to 0.010 (2ms to 10ms).")
+                print("Skipping timebase setup.")
+        except ValueError:
+            print("Skipping timebase setup.")
 
     # Trigger mode auto or normal?
     run_mode = input("(S)et up TRIGGER? (Default= leave alone) 'd' for default :").strip().lower()
@@ -721,18 +760,28 @@ try:
     input("Hit Enter to start monitoring...")
 
     # ************** MAIN LOOP  ***************** 
-    TARGET_PERIOD = 0.05  # fixed period of 50ms
+    TARGET_PERIOD = 0.070 # VPN 10 ms, Internet 30 ms, VISA Handshake 10 ms, Payload 5 ms, Execution 5ms
     ON_CONFIRMATION_THRESHOLD = 2  # Consecutive readings required to confirm ON
     on_confirmation_count = 0
     OFF_CONFIRMATION_THRESHOLD = 2  # Consecutive readings required to confirm OFF
     off_confirmation_count = 0
 
+    # IO throughput monitor
+    loop_count = 0
+    total_loop_time = 0
+    REPORT_INTERVAL = 100
+
     while not stop_program_event.is_set():
+        # IO counter
         loop_start = time.perf_counter()
         
-        # Get measurements from scope.
+        # Get IO measurements (from scope)
         meas_time, all_readings, avg_line = scope.get_measurements(
-            num_channels_to_monitor, current_state, do_interval
+            num_channels_to_monitor, 
+            current_state, 
+            do_interval,
+            low_limit=ac_line_low_limit,
+            high_limit=ac_line_high_limit,
         )
         # Check if measurement time failed and skip this cycle.
         if meas_time is None: continue
@@ -741,6 +790,22 @@ try:
         elapsed = time.perf_counter() - loop_start
         sleep_time = max(0, TARGET_PERIOD - elapsed)
         time.sleep(sleep_time)
+
+        # IO throughput calcuation (including sleep)
+        iteration_duration = time.perf_counter() - loop_start
+        total_loop_time += iteration_duration
+        loop_count += 1
+
+        if loop_count >= REPORT_INTERVAL:
+            avg_time = total_loop_time / loop_count
+            # Throughput in Hz (iterations per second)
+            throughput = 1.0 / avg_time if avg_time > 0 else 0           
+            # print(f"\n--- Performance Report (Last {REPORT_INTERVAL} loops) ---")
+            # print(f"Avg Loop Time: {avg_time:.4f}s")
+            
+            # Reset counters for the next window
+            loop_count = 0
+            total_loop_time = 0
 
         ac_line_voltage = all_readings[0]
         new_amp_data = all_readings[1:] 
