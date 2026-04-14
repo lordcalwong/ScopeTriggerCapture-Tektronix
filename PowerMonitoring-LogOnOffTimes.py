@@ -3,7 +3,7 @@ Power Monitoring- LogOnOffTimes.py
 
 Description- Continuously monitor AC Line (CH1) and Amp Output (CH2+), logging ON/OFF times (based on AC line voltage).
 
-Equipment- LXI connected scope in autorun trigger mode using measurements from Rigol, Tektronix, LeCroy, or Keysight
+Equipment- LXI (VXI-11) connected scope in autorun using measurements from Rigol, Tektronix, LeCroy, or Keysight
 
 Software- No NI-VISA, licensing, or accounts required.
 
@@ -16,7 +16,8 @@ channel (CH2).  User is given the option for this program to set up the scope on
 Data is saved to CSV file. At the end of test, an Excel file is created from the CSV file.
 
 Author: C. Wong
-Last Modified: 20260411
+v0.3
+Last Modified: 20260414
 """
 
 # Standard library
@@ -77,6 +78,28 @@ class Scope:
     def _query_vrms(self, channel):
         return "0.0"
     
+    def wait_for_completion(self, timeout=5000):
+        """
+        Not used- Place holder for non-blocking code
+        """
+        # try:
+        #     # Optionally override the VISA timeout for long operations (like a reset)
+        #     original_timeout = self.instr.timeout
+        #     if timeout:
+        #         self.instr.timeout = timeout
+            
+        #     # The query will block until the scope returns '1'
+        #     result = self.instr.query("*OPC?").strip()
+            
+        #     # Restore original timeout
+        #     if timeout:
+        #         self.instr.timeout = original_timeout
+                
+        #     return result == "1"
+        # except Exception as e:
+        #     print(f"Error during *OPC? wait: {e}")
+        #     return False
+        
     def stop(self): 
         pass
 
@@ -88,13 +111,56 @@ class Scope:
             pass 
         self.instr.close()
 
+    def interactive_config(self, num_channels_to_monitor, max_ch_on_scope):
+        """Prompts user for setup and configures."""
+        # Reset?
+        reset_request = input(f"Reset {self.brand.upper()} scope? (Y/N): ").strip().lower()
+        if reset_request == 'y':
+            print("Resetting instrument...")
+            self.instr.write("*RST")
+            self.instr.write("*CLS")
+
+        # Main setup
+        setup_auto = input(f"Auto setup on {self.brand.upper()} scope? (Y/N): ").strip().lower()
+        if setup_auto == 'y':
+            print("Setting up basic default vertical, horizontal, and trigger...")
+            self.setup(num_channels_to_monitor, max_ch_on_scope)    
+
+        # Timebase?
+        print("For 50 to 60 Hz line, ~3 full cycles (5ms/div) is recommended.")
+        prompt = "Enter timebase (2 to 10 s/div) or 'd' for default (5e-3): "
+        user_input = input(prompt).strip().lower()
+        if user_input not in ['d', '']:
+            try:
+                timebase_val = float(user_input)
+                if 0.002 <= timebase_val <= 0.010:
+                    self.set_timebase(timebase_val)
+                else:
+                    print(f"Value {timebase_val} out of range. Skipping.")
+            except ValueError:
+                print("Invalid input. Skipping timebase.")
+
+        # Trigger?
+        prompt = "Enter TRIGGER level (5 to 216V) or 'd' for default (50V): "
+        user_input = input(prompt).strip().lower()
+        if user_input not in ['d', '']:
+            try:
+                trigger_val = float(user_input)
+                if 5 <= trigger_val <= 216:
+                    # We assume Channel 1 for the AC line trigger
+                    self.set_trigger_level(1, trigger_val)
+                else:
+                    print(f"Value {trigger_val} out of range. Skipping.")
+            except ValueError:
+                print("Invalid input. Skipping trigger.")
+
     def get_measurements(self, num_channels, current_state, check_interval, force_load=False, low_limit=None, high_limit=None):
         global LAST_LOAD_CHECK_TIME
-        measurement_time = datetime.datetime.now()
         readings_all = []
         try:
             # 1. Query AC Line first (fast loop)
             raw = self._query_vrms(1)
+            measurement_time = datetime.datetime.now()
             v_line = apply_line_voltage_bounds(parse_visa_numeric(raw))
             readings_all.append(v_line)
             line_voltage_readings_queue.append(v_line)
@@ -123,10 +189,6 @@ class Scope:
         
 class TekScope(Scope):
     def setup(self, num_channels, max_channels):
-        print("Setting up Tektronix scope...")
-        reset_request = input("Reset scope? (Y/N): ").strip().lower()
-        if reset_request == 'y':
-            self.instr.write("*RST"); time.sleep(5); self.instr.write("*CLS"); time.sleep(2)
         for i in range(1, num_channels + 1):
             self.instr.write(f"SELect:CH{i} ON")
             self.instr.write(f"CH{i}:POSition 0")
@@ -161,9 +223,6 @@ class TekScope(Scope):
 
 class RigolScope(Scope):
     def setup(self, num_channels, max_channels):
-        reset_request = input("Reset scope? (Y/N): ").strip().lower()
-        if reset_request == 'y':
-            self.instr.write("*RST"); time.sleep(5); self.instr.write("*CLS"); time.sleep(2)
         for i in range(1, max_channels + 1):
             self.instr.write(f":CHANnel{i}:DISPlay OFF")
         for i in range(1, num_channels + 1):
@@ -205,10 +264,6 @@ class RigolScope(Scope):
 
 class LeCroyScope(Scope):
     def setup(self, num_channels, max_channels):
-        print("... Don't forget to set the scope (under Utilities->Utilities Setup->Remote) to LXI (VXI-11) for LeCroy...")
-        reset_request = input("Reset scope? (Y/N): ").strip().lower()
-        if reset_request == 'y':
-            self.instr.write("*RST"); time.sleep(5); self.instr.write("*CLS"); time.sleep(2)
         self.instr.write("VBS 'app.Measure.ClearAll'")
         self.instr.write("VBS 'app.Measure.ShowMeasure = True'")
         for i in range(1, max_channels + 1):
@@ -235,7 +290,7 @@ class LeCroyScope(Scope):
             "app.Acquisition.Horizontal.HorOffset = 0",
             "app.Acquisition.Trigger.Type = \"Edge\"",
             "app.Acquisition.Trigger.Edge.Source = \"C1\"",
-            "app.Acquisition.Trigger.Edge.Level = 60",
+            "app.Acquisition.Trigger.Edge.Level = 50",
             "app.Acquisition.TriggerMode = \"Auto\""
         ]
         for cmd in horizontal_settings: self.instr.write(f"VBS '{cmd}'")
@@ -260,9 +315,6 @@ class LeCroyScope(Scope):
 
 class KeysightScope(Scope):
     def setup(self, num_channels, max_channels):
-        reset_request = input("Reset scope? (Y/N): ").strip().lower()
-        if reset_request == 'y':
-            self.instr.write("*RST"); time.sleep(5); self.instr.write("*CLS"); time.sleep(2)
         self.instr.write(":MEASure:CLEar")
         for i in range(1, max_channels + 1):
             self.instr.write(f":CHANnel{i}:DISPlay OFF")
@@ -356,9 +408,10 @@ def connect_to_instrument(resource_manager: pyvisa.ResourceManager, default_ip: 
 
         try:
             instr = resource_manager.open_resource(resource_string)
-            instr.timeout = 10000 
+            instr.timeout = 10000
+            instr.write("*CLS")  # clear buffer
+            instr.query("*OPC?") # wait for operation to complete
             idn = instr.query('*IDN?').strip().upper()
-            
             # Instantiate the appropriate Scope subclass
             if "RIGOL" in idn:
                 scope_obj = RigolScope(instr, "rigol")
@@ -531,8 +584,9 @@ def get_dropout_settings():
     """
     Prompts user for drop-out monitoring configuration.
     """
-    check_dropout = input("Enable Signal Drop-out checking? (Y-Default/N)   'd' for default :").strip().lower() != 'n'
-    
+    interval = 3 
+    delay = 10
+    check_dropout = input("Enable Signal Drop-out detection? (Y/N, Default=Y)  'd' for default :").strip().lower() != 'n'
     if check_dropout:
         while True:
             val = input("Enter interval for checking load signals (2-300 sec, Default =3)   'd' for default :").strip()
@@ -709,48 +763,20 @@ try:
     )
     print("Amp Output Vrms ON = ", amp_high_limit, ", Amp Output Vrms OFF = ", amp_low_limit)
 
-    # Get Dropout configuration
+    # Get dropout configuration
     do_enabled, do_interval, do_delay = get_dropout_settings()
 
     # Set up scope?
-    setup_needed = input("(S)et up SCOPE? (Default= leave alone)   'd' for default :").strip()
-    if setup_needed.lower() == 's':
-        print("Attempting to set up scope.. .")
-        scope.setup(num_channels_to_monitor, max_ch_on_scope)
+    setup_needed = input("Review/Setup SCOPE? (Y/N, Default=N)    'd' for default :").strip()
+    if setup_needed.lower() == 's' or setup_needed.lower() == "y":
+        scope.interactive_config(num_channels_to_monitor, max_ch_on_scope)
         print("Setup complete.")
     else:
         print("Skipping scope setup.")
 
-    # Set timebase?
-    print("For 50 to 60 Hz line is recommended for ~3 full cycles in the window for 60Hz.")
-    prompt = f"Enter timebase (2 to 10 ms/div) ?     'd' for default = 5e-3 :"
-    user_input = input(prompt).strip().lower()
-    if user_input == 'd' or user_input == '':
-        print("Using default timebase.")
-    else:
-        try:
-            timebase_val = float(user_input)
-            if 0.002 <= timebase_val <= 0.010:
-                print(f"Setting timebase to {timebase_val} s/div")
-                scope.set_timebase(timebase_val)
-            else:
-                print(f"Error: {timebase_val} is out of range. Please use 0.002 to 0.010 (2ms to 10ms).")
-                print("Skipping timebase setup.")
-        except ValueError:
-            print("Skipping timebase setup.")
-
-    # Trigger mode auto or normal?
-    run_mode = input("(S)et up TRIGGER? (Default= leave alone) 'd' for default :").strip().lower()
-    if run_mode == 's':
-        print("Setting trigger mode.")
-        scope.set_trigger()
-        print("Trigger set up.")
-    else: 
-        print("Skipping trigger setup.")
-
     # Create a data file for logging based on the current timestamp. This time/data log be used for duration of test.
     start_time = datetime.datetime.now()
-    user_path, datafile_name = make_datafile(start_time, do_enabled,do_interval)
+    user_path, datafile_name = make_datafile(start_time, do_enabled, do_interval)
     full_data_path = os.path.join(user_path, datafile_name)
     print("Created file ", datafile_name, " in path: ", user_path)
 
@@ -788,6 +814,8 @@ try:
 
         # sleep timer
         elapsed = time.perf_counter() - loop_start
+        if elapsed > 1: 
+            print(f"[WARN] Instrument read took {elapsed:.3f} s")
         sleep_time = max(0, TARGET_PERIOD - elapsed)
         time.sleep(sleep_time)
 
@@ -820,12 +848,10 @@ try:
                 print(f"Initial state detected as ON. Waiting for next transition.")
                 start_time = meas_time
                 last_state_time = meas_time
-                scope.set_trigger_level(1, ac_line_low_limit)
             elif ac_line_off:
                 current_state = "OFF"
                 print(f"Initial state detected as OFF. Waiting for next transition.")
                 start_time = meas_time
-                scope.set_trigger_level(1, ac_line_high_limit)
             else:
                 # Still in an indeterminate state or no clear ON/OFF. Keep current_state as UNKNOWN.
                 pass # No change, continue will be called below
@@ -865,8 +891,8 @@ try:
             elif ac_line_on and not ac_line_off:
                 steady_state_line_voltage = avg_line
 
-            # Periodic Dropout Check and Log
-            if do_enabled and None not in new_amp_data and new_actual_state == "ON":
+            # Periodic Dropout Check  (recheck AC power is stable and not close to turning off)
+            if do_enabled and None not in new_amp_data and new_actual_state == "ON" and ac_line_voltage > (ac_line_low_limit + 15):
                 if elapsed > do_delay:
                     if not all(v >= amp_high_limit for v in new_amp_data):
                         event_counter += 1
@@ -885,11 +911,6 @@ try:
                 last_state_time = meas_time
                 print(f"[{meas_time.strftime('%H:%M:%S')}] First transition detected: System is now {current_state}.")
                 first_transition_logged = True
-                # Set the trigger level for the next transition depending on state
-                if current_state == "ON":       # State is ON, set low limit
-                    scope.set_trigger_level(1, ac_line_low_limit)
-                else:                           # State is OFF, set high limit
-                    scope.set_trigger_level(1, ac_line_high_limit)
             else: 
                 # This is a subsequent transition; start logging from this pointon
                 duration = (meas_time - start_time).total_seconds()
@@ -902,7 +923,6 @@ try:
                     start_time = meas_time
                     last_state_time = meas_time
                     steady_state_line_voltage = 0.0
-                    scope.set_trigger_level(1, ac_line_low_limit)
 
                 elif current_state == "ON" and new_actual_state == "OFF":
                     # Transition from ON to OFF
@@ -913,8 +933,6 @@ try:
                     print(f"[{meas_time.strftime('%H:%M:%S')}] OFF.  ON  duration was {duration:8.3f} sec at {voltage_to_log:6.3f} Vrms line.")
                     current_state = "OFF"
                     start_time = meas_time
-                    # Set trigger for next OFF detection
-                    scope.set_trigger_level(1, ac_line_high_limit)
 
 except KeyboardInterrupt:
     print("\nProgram terminated by user (Ctrl+C).")
