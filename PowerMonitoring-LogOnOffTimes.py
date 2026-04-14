@@ -16,7 +16,7 @@ channel (CH2).  User is given the option for this program to set up the scope on
 Data is saved to CSV file. At the end of test, an Excel file is created from the CSV file.
 
 Author: C. Wong
-v0.3
+v0.4
 Last Modified: 20260414
 """
 
@@ -584,15 +584,15 @@ def get_dropout_settings():
     """
     Prompts user for drop-out monitoring configuration.
     """
-    interval = 3 
+    interval = 5 
     delay = 10
     check_dropout = input("Enable Signal Drop-out detection? (Y/N, Default=Y)  'd' for default :").strip().lower() != 'n'
     if check_dropout:
         while True:
-            val = input("Enter interval for checking load signals (2-300 sec, Default =3)   'd' for default :").strip()
+            val = input("Enter interval for checking load signals (2-300 sec, Default =5)   'd' for default :").strip()
             
             if val == 'd' or val == '':
-                interval = 3
+                interval = 5
                 break
 
             try:
@@ -617,7 +617,7 @@ def get_dropout_settings():
                 print("Out of range (5-300).")
             except ValueError: 
                 print("Invalid entry. Please enter a number or 'd'.")
-            
+    print("Caution- network latency and instrument IO delay (generally 20 ms) can take up to 6 sec total.")        
     return check_dropout, interval, delay
 
 def log_event(path, filename, count, start_time, end_time, line_v, state, duration, label=""):  
@@ -659,44 +659,41 @@ def write_to_excel(filename, path):
                 # Add the data to the row
                 ws.append(row)
                 
-                # Format the header row
-                if r_idx == 1:
-                    for c_idx in range(len(row)):
-                        cell = ws.cell(row=r_idx, column=c_idx + 1)
-                        cell.font = header_font
-                    continue
-                
                 # Iterate through the cells in the current row to apply types and formats
                 for c_idx, val in enumerate(row):
                     cell = ws.cell(row=r_idx, column=c_idx + 1)
                     
+                    # Format the header row
+                    if r_idx == 1:
+                        cell.font = header_font
+                        continue   # row complete; only remaining are numbers           
+
                     # Columns 1 -> Integer
-                    if c_idx in [0]:
+                    if c_idx == 0:
                         try:
                             cell.value = float(val)
                             cell.number_format = '0'
                         except (ValueError, TypeError):
-                            pass # Keep as string if conversion fails
+                            pass
 
                     # Columns 4 and 6 (indices 3, 5) -> Numbers
-                    if c_idx in [3, 5]:
+                    elif c_idx in [3, 5]:
                         try:
                             cell.value = float(val)
-                            cell.number_format = '0.000'
+                            cell.number_format = '0'
                         except (ValueError, TypeError):
-                            pass # Keep as string if conversion fails
+                            pass
                             
-                    # Columns 2 and 3 (indices 1, 2) -> Dates with custom format
+                    # Columns 2 and 3 (indices 1, 2) -> Dates 
                     elif c_idx in [1, 2]:
                         try:
                             # Parse the specific string format: 2026-04-07 11:33:08.208383
                             dt_obj = datetime.datetime.strptime(val, '%Y-%m-%d %H:%M:%S.%f')
                             cell.value = dt_obj
                             # Custom Excel format: yyyy-mmm-dd hh:mm:ss.000
-                            # Note: .000 in Excel displays milliseconds
                             cell.number_format = 'yyyy-mmm-dd hh:mm:ss.000'
                         except (ValueError, TypeError):
-                            pass # Keep as string if conversion fails
+                            pass
 
         # Auto-adjust column widths so dates are visible
         for column_cells in ws.columns:
@@ -814,7 +811,7 @@ try:
 
         # sleep timer
         elapsed = time.perf_counter() - loop_start
-        if elapsed > 1: 
+        if elapsed > do_interval: 
             print(f"[WARN] Instrument read took {elapsed:.3f} s")
         sleep_time = max(0, TARGET_PERIOD - elapsed)
         time.sleep(sleep_time)
