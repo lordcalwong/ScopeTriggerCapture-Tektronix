@@ -1,23 +1,31 @@
-# Power Monitoring- Synchronous
-#
-# Continuous monitor Amplifier Output channels and/or Line Inputs with
-# user set synchronous logging. Trigger level must be user set and 
-# mode should be in autorun.
-#
-# User inputs IP address, sample time in seconds with default of 5 seconds,
-# and number of channels to monitor (1-8).
-# 
-# User has option to set up scope or allow continous channels to be configured
-# for RMS measurements.
-#
-# Currently, the maximum voltage is set to 50Vp or about 300W/ch.
-# Uses pyvisa for generic scope SCPI communications for both DPO4k and MSO58
-# series scopes.
-#
-# Saves data to csv file on desktop, closes file, and imports csv into MS 
-# Excel file and plots a chart.
-#
-# Author: C. Wong 20250709
+"""
+Power Monitoring- Synchronous
+
+Description- Generic Tektronix Power Output Monitoring Script.
+
+Continuous monitor Amplifier Output channels and/or Line Inputs with user set synchronous logging.
+Trigger level must be user set and mode should be in autorun.
+
+Equipment- Tektronix scopes, e.g., DPO4k and MSO58 series
+
+Software- No NI-VISA, licensing, or accounts required. Uses pyvisa for generic scope SCPI communications.
+
+User inputs IP address, sample time in seconds with default of 5 seconds, and number of channels
+to monitor (1-8).
+
+User has option to set up scope or allow continous channels to be configured for RMS measurements.
+
+Currently, the maximum voltage is set to 50Vp or about 300W/ch.
+
+Saves data to csv file on desktop, closes file, and imports csv into MS Excel file and plots a chart.
+
+Author: C. Wong
+v2.0
+Last Modified: 20260415
+"""
+
+# Print the header at runtime.
+print(__doc__)
 
 import time
 import datetime
@@ -36,7 +44,7 @@ from openpyxl.chart.shapes import GraphicalProperties
 from openpyxl.drawing.colors import ColorChoice
 
 DEFAULT_IP_ADDRESS = '192.168.1.53'  #default IP, 192.168.1.53, 10.101.100.151
-MIN_ACQUISITION_INTERVAL = 5   # default sampling rate
+MIN_ACQUISITION_INTERVAL = 10   # seconds default sampling rate
 MAX_VRMS = 50
 
 # Find user desktop one level down from home (~/* /Desktop) and set up as optional save path
@@ -337,15 +345,14 @@ def write_to_excel_with_chart(datafile_name: str, save_directory: str, num_chann
         print(f"An error occurred while creating the Excel file: {e}")
 
 # --- MAIN ---
-if __name__ == "__main__":
-    print("Generic Tektronix Power Out Monitoring Script\n")
-    print("Takes measurement scope data and logs to csv file on desktop and makes an Excel chart")
-
+def main():
+    
+    # Get sampling rate
+    sample_time = sample_period(MIN_ACQUISITION_INTERVAL)
+    
     # Initialize the Resource Manager
     rm = pyvisa.ResourceManager('@py')
     print("Resources found " , rm.list_resources())
-
-    sample_time = sample_period(MIN_ACQUISITION_INTERVAL)
 
     # Create Event object for sampling time and start timer
     acquisition_allowed_event = threading.Event()
@@ -448,3 +455,6 @@ if __name__ == "__main__":
         # After data acquisition stops, write to Excel if a datafile was created
         if datafile_name and num_channels_to_monitor > 0:
             write_to_excel_with_chart(datafile_name, user_path, num_channels_to_monitor)
+
+if __name__ == "__main__":
+    main()

@@ -17,8 +17,8 @@ channel (CH2).  User is given the option for this program to set up the scope on
 Data is saved to CSV file. At the end of test, an Excel file is created from the CSV file.
 
 Author: C. Wong
-v0.5
-Last Modified: 20260415
+v0.6
+Last Modified: 20260416
 """
 
 def main():
@@ -252,6 +252,8 @@ def main():
             self.instr.write(":TRIGger:EDGe:COUPling DC")
             self.instr.write(":TRIGger:EDGe:SLOpe POSitive")
             self.instr.write(":TRIGger:EDGe:LEVel 50")
+            self.instr.write(":TRIGger:SWEep AUTO)")
+            self.instr.write(":RUN")
             time.sleep(1)
 
         def set_trigger(self):
